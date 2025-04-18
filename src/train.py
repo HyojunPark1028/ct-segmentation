@@ -1,0 +1,40 @@
+import os, torch, pandas as pd
+from omegaconf import OmegaConf
+from torch.utils.data import DataLoader
+from .models.unet import UNet
+from .dataset import NpySegDataset
+from .losses import get_loss
+from .evaluate import evaluate
+
+def train(cfg_path):
+    cfg=OmegaConf.load(cfg_path); os.makedirs(cfg.train.save_dir, exist_ok=True)
+    device='cuda' if torch.cuda.is_available() else 'cpu'
+
+    # Dataset (pre‑split)
+    tr_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'train'), augment=True)
+    vl_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'val'))
+    ts_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'test'))
+    tr_dl=DataLoader(tr_ds,batch_size=cfg.train.batch_size,shuffle=True ,num_workers=cfg.train.num_workers)
+    vl_dl=DataLoader(vl_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
+    ts_dl=DataLoader(ts_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
+
+    model=UNet().to(device)
+    opt=torch.optim.Adam(model.parameters(), lr=cfg.train.lr)
+    criterion=get_loss()
+
+    history=[]
+    for ep in range(cfg.train.epochs):
+        model.train(); run=0
+        for x,y in tr_dl:
+            x,y=x.to(device),y.to(device)
+            opt.zero_grad(); loss=criterion(model(x),y); loss.backward(); opt.step(); run+=loss.item()
+        vd,vi=evaluate(model,vl_dl,device,cfg.data.threshold)
+        row=dict(epoch=ep+1,train_loss=run/len(tr_dl),val_dice=vd,val_iou=vi)
+        history.append(row); print(row)
+
+    # save metrics
+    pd.DataFrame(history).to_csv(os.path.join(cfg.train.save_dir,'metrics.csv'),index=False)
+
+    # final test evaluation + visualize
+    td,ti=evaluate(model,ts_dl,device,cfg.data.threshold,vis=cfg.eval.visualize)
+    print(f"TEST ➜ Dice:{td:.4f} IoU:{ti:.4f}")
