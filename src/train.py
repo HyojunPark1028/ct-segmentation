@@ -5,6 +5,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from datetime import datetime
 from .models.unet import UNet
+from .models.transunet import TransUNet
 from .dataset import NpySegDataset
 from .losses import get_loss
 from .evaluate import evaluate, compute_mask_coverage
@@ -37,7 +38,14 @@ def train(cfg_path):
     vl_dl=DataLoader(vl_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
     ts_dl=DataLoader(ts_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
 
-    model=UNet().to(device)
+    # Model Selection
+    if cfg.model.name.lower() == "unet":
+        model=UNet().to(device)
+    elif cfg.model.name.lower() == "transunet":
+        model = TransUNet(image_size=cfg.model.img_size, num_classes=1).to(device)
+    else:
+        raise ValueError(f"Unsupported model name: {cfg.model.name}")
+
     opt=torch.optim.Adam(model.parameters(), lr=cfg.train.lr)
     criterion=get_loss()
 
