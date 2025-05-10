@@ -36,7 +36,7 @@ def train(cfg_path):
         vd,vi=evaluate(model,vl_dl,device,cfg.data.threshold)
         row=dict(epoch=ep+1,train_loss=run/len(tr_dl),val_dice=vd,val_iou=vi)
         history.append(row); print(row)
-        print(f"[Epoch {ep+1}] loss: {row['train_loss']:.4f}, val_dice: {vd:.f4}, val_iou: {vi:.4f}")
+        print(f"[Epoch {ep+1}] loss: {row['train_loss']:.4f}, val_dice: {vd:.4f}, val_iou: {vi:.4f}")
 
     # save metrics
     pd.DataFrame(history).to_csv(os.path.join(cfg.train.save_dir,'metrics.csv'),index=False)
