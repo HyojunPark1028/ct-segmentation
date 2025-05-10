@@ -30,9 +30,9 @@ def train(cfg_path):
     OmegaConf.save(cfg, os.path.join(cfg.train.save_dir, "used_config.yaml"))
 
     # Dataset (pre‑split)
-    tr_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'train'), augment=True, seed=cfg.experiment.seed)
-    vl_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'val'), seed=cfg.experiment.seed)
-    ts_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'test'), seed=cfg.experiment.seed)
+    tr_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'train'), augment=True)
+    vl_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'val'))
+    ts_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'test'))
     tr_dl=DataLoader(tr_ds,batch_size=cfg.train.batch_size,shuffle=True ,num_workers=cfg.train.num_workers)
     vl_dl=DataLoader(vl_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
     ts_dl=DataLoader(ts_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
