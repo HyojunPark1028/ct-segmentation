@@ -3,6 +3,7 @@ from torch.utils.data import Dataset
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
+
 base_aug = A.Compose([
     A.HorizontalFlip(p=0.5),
     A.RandomRotate90(p=0.5),
@@ -13,7 +14,8 @@ no_aug  = A.Compose([ToTensorV2()])
 
 class NpySegDataset(Dataset):
     """Loads npy slice + png mask from predefined split dir (train/val/test)"""
-    def __init__(self, split_dir: str, augment=False):
+    def __init__(self, split_dir: str, augment=False, seed: int = 42):
+        A.set_seed(seed)
         self.split_dir = split_dir
         self.img_dir = os.path.join(split_dir, 'images') if os.path.isdir(os.path.join(split_dir,'images')) else split_dir
         self.mask_dir= os.path.join(split_dir, 'masks')  if os.path.isdir(os.path.join(split_dir,'masks'))  else split_dir
