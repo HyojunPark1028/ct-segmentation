@@ -9,3 +9,10 @@ wandb/
 .idea/
 .vscode/
 drive/
+data/
+dataset/
+*.npy
+*.png
+*.jpg
+*.nii
+*.zip

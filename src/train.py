@@ -1,6 +1,7 @@
 import os, torch, pandas as pd
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
+from tqdm import tqdm
 from .models.unet import UNet
 from .dataset import NpySegDataset
 from .losses import get_loss
@@ -25,12 +26,17 @@ def train(cfg_path):
     history=[]
     for ep in range(cfg.train.epochs):
         model.train(); run=0
-        for x,y in tr_dl:
+        loop = tqdm(tr_dl, desc=f"Epoch {ep+1}/{cfg.train.epochs}", leave=False)
+        for x,y in loop:
             x,y=x.to(device),y.to(device)
-            opt.zero_grad(); loss=criterion(model(x),y); loss.backward(); opt.step(); run+=loss.item()
+            pred = model(x)
+            loss=criterion(pred,y);
+            opt.zero_grad(); loss.backward(); opt.step(); run+=loss.item()
+            loop.set_postfix(loss=loss.item(), mean_pred=torch.sigmoid(pred).mean().item())
         vd,vi=evaluate(model,vl_dl,device,cfg.data.threshold)
         row=dict(epoch=ep+1,train_loss=run/len(tr_dl),val_dice=vd,val_iou=vi)
         history.append(row); print(row)
+        print(f"[Epoch {ep+1}] loss: {row['train_loss']:.4f}, val_dice: {vd:.f4}, val_iou: {vi:.4f}")
 
     # save metrics
     pd.DataFrame(history).to_csv(os.path.join(cfg.train.save_dir,'metrics.csv'),index=False)
