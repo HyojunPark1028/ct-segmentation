@@ -7,8 +7,19 @@ from .dataset import NpySegDataset
 from .losses import get_loss
 from .evaluate import evaluate
 
+def seed_everything(seed=42):
+    import random, numpy as np
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
 def train(cfg_path):
-    cfg=OmegaConf.load(cfg_path); os.makedirs(cfg.train.save_dir, exist_ok=True)
+    cfg=OmegaConf.load(cfg_path); seed_everything(cfg.experiment.seed); os.makedirs(cfg.train.save_dir, exist_ok=True)
     device='cuda' if torch.cuda.is_available() else 'cpu'
 
     # Save config snapshot
