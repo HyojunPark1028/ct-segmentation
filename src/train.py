@@ -50,6 +50,11 @@ def train(cfg_path):
     # save metrics
     pd.DataFrame(history).to_csv(os.path.join(cfg.train.save_dir,'metrics.csv'),index=False)
 
-    # final test evaluation + visualize
+    # final test evaluation using best model + visualize
+    model.load_state_dict(torch.load(os.path.join(cfg.train.save_dir, "model_best.pth")))
     td,ti=evaluate(model,ts_dl,device,cfg.data.threshold,vis=cfg.eval.visualize)
     print(f"TEST ➜ Dice:{td:.4f} IoU:{ti:.4f}")
+
+    # Save test result
+    test_result = {"test_dice":td,"test_iou":ti}
+    pd.DataFrame([test_result]).to_csv(os.path.join(cfg.train.save_dir, "test_result.csv"), index=False)
