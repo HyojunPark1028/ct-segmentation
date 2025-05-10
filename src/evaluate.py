@@ -21,8 +21,8 @@ def evaluate(model, loader, device, thr=0.5, vis=False):
             di,io=_metric(p,y,thr); d+=di; i+=io
             if vis and k==0: 
                 vis_n = min(10, x.shape[0])  # 안전하게 제한
-                for i in range(vis_n):
-                    _vis(x[i],y[i],p[i], thr)
+                for j in range(vis_n):
+                    _vis(x[j],y[j],p[j], thr)
                     plt.pause(0.1)
     return d/n,i/n
 
