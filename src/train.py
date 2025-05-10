@@ -11,6 +11,9 @@ def train(cfg_path):
     cfg=OmegaConf.load(cfg_path); os.makedirs(cfg.train.save_dir, exist_ok=True)
     device='cuda' if torch.cuda.is_available() else 'cpu'
 
+    # Save config snapshot
+    OmegaConf.save(cfg, os.path.join(cfg.train.save_dir, "used_config.yaml"))
+
     # Dataset (pre‑split)
     tr_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'train'), augment=True)
     vl_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'val'))
@@ -24,6 +27,7 @@ def train(cfg_path):
     criterion=get_loss()
 
     history=[]
+    best_dice = 0
     for ep in range(cfg.train.epochs):
         model.train(); run=0
         loop = tqdm(tr_dl, desc=f"Epoch {ep+1}/{cfg.train.epochs}", leave=False)
@@ -37,6 +41,11 @@ def train(cfg_path):
         row=dict(epoch=ep+1,train_loss=run/len(tr_dl),val_dice=vd,val_iou=vi)
         history.append(row); print(row)
         print(f"[Epoch {ep+1}] loss: {row['train_loss']:.4f}, val_dice: {vd:.4f}, val_iou: {vi:.4f}")
+
+        # Save best model
+        if vd > best_dice:
+            best_dice = vd
+            torch.save(model.state_dict(), os.path.join(cfg.train.save_dir, "model_best.pth"))
 
     # save metrics
     pd.DataFrame(history).to_csv(os.path.join(cfg.train.save_dir,'metrics.csv'),index=False)
