@@ -1,11 +1,13 @@
+import time
 import os, torch, pandas as pd
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
+from datetime import datetime
 from .models.unet import UNet
 from .dataset import NpySegDataset
 from .losses import get_loss
-from .evaluate import evaluate
+from .evaluate import evaluate, compute_mask_coverage
 
 def seed_everything(seed=42):
     import random, numpy as np
@@ -19,6 +21,7 @@ def seed_everything(seed=42):
     torch.backends.cudnn.benchmark = False
 
 def train(cfg_path):
+    start_time=time.time()
     cfg=OmegaConf.load(cfg_path); seed_everything(cfg.experiment.seed); os.makedirs(cfg.train.save_dir, exist_ok=True)
     device='cuda' if torch.cuda.is_available() else 'cpu'
 
@@ -49,7 +52,8 @@ def train(cfg_path):
             opt.zero_grad(); loss.backward(); opt.step(); run+=loss.item()
             loop.set_postfix(loss=loss.item(), mean_pred=torch.sigmoid(pred).mean().item())
         vd,vi=evaluate(model,vl_dl,device,cfg.data.threshold)
-        row=dict(epoch=ep+1,train_loss=run/len(tr_dl),val_dice=vd,val_iou=vi)
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        row=dict(epoch=ep+1,train_loss=run/len(tr_dl),val_dice=vd,val_iou=vi,timestamp=timestamp)
         history.append(row); print(row)
         print(f"[Epoch {ep+1}] loss: {row['train_loss']:.4f}, val_dice: {vd:.4f}, val_iou: {vi:.4f}")
 
@@ -69,3 +73,15 @@ def train(cfg_path):
     # Save test result
     test_result = {"test_dice":td,"test_iou":ti}
     pd.DataFrame([test_result]).to_csv(os.path.join(cfg.train.save_dir, "test_result.csv"), index=False)
+
+    coverage_stats = compute_mask_coverage(model, ts_dl, device, cfg.data.threshold)
+    print("\n Mask Prediction Coverage:")
+    for k, v in coverage_stats.items():
+        print(f"{k}: {v}")
+
+    # save test coverage
+    pd.DataFrame([coverage_stats]).to_csv(os.path.join(cfg.train.save_dir, "test_coverage.csv"), index=False)
+
+    # print total time
+    elapsed = time.time() - start_time
+    print(f"\n Total training time: {elapsed/60:.2f} minutes")

@@ -24,3 +24,26 @@ def evaluate(model, loader, device, thr=0.5, vis=False):
                     _vis(x[i],y[i],p[i], thr)
                     plt.pause(0.1)
     return d/n,i/n
+
+def compute_mask_coverage(model, loader, device, thr=0.5):
+    model.eval()
+    gt_total = 0
+    pred_total = 0
+    inter_total = 0
+    with torch.no_grad():
+        for x, y in loader:
+            x, y = x.to(device), y.to(device)
+            pred = torch.sigmoid(model(x)) > thr
+            inter = (pred * y).sum()
+            gt_total += y.sum()
+            pred_total += pred.sum()
+            inter_total += inter
+    coverage = (inter_total / gt_total).item() if gt_total > 0 else 0.0
+    overpredict = (pred_total / gt_total).item() if gt_total > 0 else 0.0
+    return {
+        "gt_pixels": int(gt_total),
+        "pred_pixels": int(pred_total),
+        "intersection": int(inter_total),
+        "coverage": coverage,
+        "overpredict": overpredict
+    }
