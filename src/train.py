@@ -42,7 +42,7 @@ def train(cfg_path):
     if cfg.model.name.lower() == "unet":
         model=UNet().to(device)
     elif cfg.model.name.lower() == "transunet":
-        model = TransUNet(image_size=cfg.model.img_size, num_classes=1).to(device)
+        model = TransUNet(img_size=cfg.model.img_size, num_classes=1).to(device)
     else:
         raise ValueError(f"Unsupported model name: {cfg.model.name}")
 
