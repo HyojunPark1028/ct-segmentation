@@ -20,7 +20,8 @@ def evaluate(model, loader, device, thr=0.5, vis=False):
             x,y=x.to(device),y.to(device); p=torch.sigmoid(model(x))
             di,io=_metric(p,y,thr); d+=di; i+=io
             if vis and k==0: 
-                for i in range(10):
+                n = min(10, x.shape[0])  # 안전하게 제한
+                for i in range(n):
                     _vis(x[i],y[i],p[i], thr)
                     plt.pause(0.1)
     return d/n,i/n
