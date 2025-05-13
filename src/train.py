@@ -12,6 +12,7 @@ from .evaluate import evaluate, compute_mask_coverage
 
 def seed_everything(seed=42):
     import random, numpy as np
+    os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
