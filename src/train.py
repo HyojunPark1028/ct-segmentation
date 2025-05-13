@@ -31,9 +31,14 @@ def train(cfg_path):
     OmegaConf.save(cfg, os.path.join(cfg.train.save_dir, "used_config.yaml"))
 
     # Dataset (pre‑split)
-    tr_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'train'), augment=True)
-    vl_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'val'))
-    ts_ds=NpySegDataset(os.path.join(cfg.data.root_dir,'test'))
+    # ✅ 모델에 따라 img_size 결정
+    model_name = cfg.model.name.lower()
+    img_size = cfg.model.img_size if model_name == "transunet" else None
+
+    # Dataset (pre‑split)
+    tr_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'train'), augment=True, img_size=img_size)
+    vl_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'val'), img_size=img_size)
+    ts_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'test'), img_size=img_size)
     tr_dl=DataLoader(tr_ds,batch_size=cfg.train.batch_size,shuffle=True ,num_workers=cfg.train.num_workers)
     vl_dl=DataLoader(vl_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
     ts_dl=DataLoader(ts_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)

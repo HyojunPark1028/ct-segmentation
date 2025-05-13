@@ -1,6 +1,6 @@
 model:
   name: transunet
-  img_size: 512
+  img_size: 224
 
 experiment:
   name: transunet_hu_dice_focal
