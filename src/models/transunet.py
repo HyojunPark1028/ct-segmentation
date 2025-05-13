@@ -28,7 +28,7 @@ class TransUNet(nn.Module):
         self.img_size = img_size
 
         # ResNet50 encoder (low-level feature extractor)
-        resnet = resnet50(pretrained=True)
+        resnet = resnet50(pretrained=False)
         resnet.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.encoder1 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu)  # 64
         self.encoder2 = nn.Sequential(resnet.maxpool, resnet.layer1)          # 256
