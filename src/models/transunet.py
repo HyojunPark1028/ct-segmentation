@@ -23,13 +23,22 @@ class DecoderBlock(nn.Module):
 
 
 class TransUNet(nn.Module):
-    def __init__(self, img_size=224, num_classes=1):
+    def __init__(self, img_size=224, num_classes=1, use_pretrained=False):
         super().__init__()
         self.img_size = img_size
+        self.use_pretrained = use_pretrained
 
         # ResNet50 encoder (low-level feature extractor)
-        resnet = resnet50(pretrained=False)
-        resnet.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+        resnet = resnet50(pretrained=use_pretrained)
+        if use_pretrained:
+            # convert pretrained RGB con1 to 1-channel by averaging weights
+            pretrained_conv1 = resnet.conv1
+            new_conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
+            with torch.no_grad():
+                new_conv1.weight = nn.Parameter(pretrained_conv1.weight.sum(dim=1, keepdim=True))
+            resnet.conv1 = new_conv1
+        else:
+            resnet.conv1 = nn.Conv2d(1, 64, kernel_size=7, stride=2, padding=3, bias=False)
         self.encoder1 = nn.Sequential(resnet.conv1, resnet.bn1, resnet.relu)  # 64
         self.encoder2 = nn.Sequential(resnet.maxpool, resnet.layer1)          # 256
         self.encoder3 = resnet.layer2                                         # 512
@@ -40,7 +49,7 @@ class TransUNet(nn.Module):
         self.vit_proj = nn.Conv2d(2048, 768, kernel_size=1)
 
         # ViT backbone
-        self.vit = vit_base_patch16_224(pretrained=False)
+        self.vit = vit_base_patch16_224(pretrained=use_pretrained)
         self.hidden_dim = 768
 
         # Decoder
@@ -63,6 +72,11 @@ class TransUNet(nn.Module):
 
         # ViT input
         x_vit = self.vit_proj(e5)  # [B, 768, H/32, W/32]
+
+        # If pretrained, ViT expects 3-channel patch embeddings (simulated via repeat)
+        if self.use_pretrained:
+            x_vit = x_vit.repeat(1, 3 // x_vit.shape[1], 1, 1) if x_vit.shape[1] == 1 else x_vit
+
         B, C, H_v, W_v = x_vit.shape
         x_patches = rearrange(x_vit, 'b c h w -> b (h w) c')
         x_vit_out = self.vit.blocks(x_patches)

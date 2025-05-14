@@ -35,6 +35,7 @@ def train(cfg_path):
     # ✅ 모델에 따라 img_size 결정
     model_name = cfg.model.name.lower()
     img_size = cfg.model.img_size if model_name == "transunet" else None
+    use_pretrained = cfg.model.get("use_pretrained", False)
 
     # Dataset (pre‑split)
     tr_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'train'), augment=True, img_size=img_size)
@@ -46,10 +47,9 @@ def train(cfg_path):
 
     # Model Selection
     if cfg.model.name.lower() == "unet":
-        use_pretrained = cfg.model.get("use_pretrained", False)
         model=UNet(use_pretrained=use_pretrained).to(device)
     elif cfg.model.name.lower() == "transunet":
-        model = TransUNet(img_size=cfg.model.img_size, num_classes=1).to(device)
+        model = TransUNet(img_size=cfg.model.img_size, num_classes=1, use_pretrained=use_pretrained).to(device)
     else:
         raise ValueError(f"Unsupported model name: {cfg.model.name}")
 
