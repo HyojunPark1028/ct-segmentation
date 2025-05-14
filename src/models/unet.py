@@ -1,8 +1,26 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import segmentation_models_pytorch as smp
 
 class UNet(nn.Module):
+    def __init__(self, use_pretrained=False, in_channels=1, out_channels=1):
+        super().__init__()
+        if use_pretrained:
+            self.model = smp.Unet(
+                encoder_name="resnet34",
+                encoder_weights="imagenet",
+                in_channels=in_channels,
+                classes=out_channels,
+                activation=None
+            )
+        else:
+            self.model = ClassicUNet(in_channels, out_channels)
+    
+    def forward(self, x):
+        return self.model(x)
+
+class ClassicUNet(nn.Module):
     """Exact UNet copied from original notebook"""
     def __init__(self, in_channels=1, out_channels=1, features=(64,128,256,512)):
         super().__init__()

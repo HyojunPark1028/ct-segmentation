@@ -1,9 +1,10 @@
 model:
   name: unet
+  use_pretrained: true
   img_size: 512
 
 experiment:
-  name: unet_hu_dice_focal_epoch30
+  name: unet_hu_dice_focal_epoch20_pretrained
   seed: 42
 
 data:
@@ -12,10 +13,10 @@ data:
 
 train:
   batch_size: 4
-  epochs: 30
+  epochs: 20
   lr: 0.0001
   loss: dice_focal                  # fixed combo loss
-  save_dir: outputs/unet_hu_dice_focal
+  save_dir: outputs/unet_hu_dice_focal_epoch20_pretrained
   num_workers: 0
 
 eval:

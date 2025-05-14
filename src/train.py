@@ -46,7 +46,8 @@ def train(cfg_path):
 
     # Model Selection
     if cfg.model.name.lower() == "unet":
-        model=UNet().to(device)
+        use_pretrained = cfg.model.get("use_pretrained", False)
+        model=UNet(use_pretrained=use_pretrained).to(device)
     elif cfg.model.name.lower() == "transunet":
         model = TransUNet(img_size=cfg.model.img_size, num_classes=1).to(device)
     else:
