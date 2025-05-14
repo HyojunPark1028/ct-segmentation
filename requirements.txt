@@ -12,3 +12,4 @@ scipy
 SimpleITK
 timm
 einops
+segmentation-models-pytorch
