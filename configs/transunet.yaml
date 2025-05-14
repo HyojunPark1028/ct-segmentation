@@ -4,7 +4,7 @@ model:
   img_size: 224
 
 experiment:
-  name: transunet_hu_dice_focal_epoch30
+  name: transunet_hu_dice_focal_epoch20_pretrained
   seed: 42
 
 data:
@@ -16,7 +16,7 @@ train:
   epochs: 20
   lr: 0.0001
   loss: dice_focal                  # fixed combo loss
-  save_dir: outputs/transunet_hu_dice_focal
+  save_dir: outputs/transunet_hu_dice_focal_epoch20_pretrained
   num_workers: 0
 
 eval:

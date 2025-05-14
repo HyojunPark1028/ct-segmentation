@@ -6,6 +6,7 @@ from tqdm import tqdm
 from datetime import datetime
 from .models.unet import UNet
 from .models.transunet import TransUNet
+from .models.swinunet import SwinUNet
 from .dataset import NpySegDataset
 from .losses import get_loss
 from .evaluate import evaluate, compute_mask_coverage
@@ -34,7 +35,7 @@ def train(cfg_path):
     # Dataset (pre‑split)
     # ✅ 모델에 따라 img_size 결정
     model_name = cfg.model.name.lower()
-    img_size = cfg.model.img_size if model_name == "transunet" else None
+    img_size = cfg.model.img_size if model_name in ["transunet", "swinunet"] else None
     use_pretrained = cfg.model.get("use_pretrained", False)
 
     # Dataset (pre‑split)
@@ -50,6 +51,8 @@ def train(cfg_path):
         model=UNet(use_pretrained=use_pretrained).to(device)
     elif cfg.model.name.lower() == "transunet":
         model = TransUNet(img_size=cfg.model.img_size, num_classes=1, use_pretrained=use_pretrained).to(device)
+    elif cfg.model.name.lower() == "swinunet":
+        model = SwinUNet(img_size=cfg.model.img_size, num_classes=1, use_pretrained=use_pretrained).to(device)
     else:
         raise ValueError(f"Unsupported model name: {cfg.model.name}")
 
