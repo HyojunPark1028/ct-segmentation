@@ -4,7 +4,7 @@ model:
   img_size: 224
 
 experiment:
-  name: swinunet_hu_dice_focal_epoch20_pretrained
+  name: swinunet_hu_dice_focal_epoch30_pretrained
   seed: 42
 
 data:
@@ -16,7 +16,7 @@ train:
   epochs: 30
   lr: 0.0001
   loss: dice_focal
-  save_dir: outputs/swinunet_hu_dice_focal_epoch20_pretrained
+  save_dir: outputs/swinunet_hu_dice_focal_epoch30_pretrained
   num_workers: 0
 
 eval:

@@ -4,11 +4,11 @@ model:
   img_size: 512
 
 experiment:
-  name: unet_hu_dice_focal_epoch20_pretrained
+  name: unet_hu_dice_focal_epoch230_pretrained
   seed: 42
 
 data:
-  root_dir: "C:/Users/Hyojun Park/Paper/ct-segmentation/src/content/data"           # contains train/ val/ test/ sub‑dirs
+  root_dir: "./src/content/data"          # contains train/ val/ test/ sub‑dirs
   threshold: 0.3
 
 train:
@@ -16,7 +16,7 @@ train:
   epochs: 30
   lr: 0.0001
   loss: dice_focal                  # fixed combo loss
-  save_dir: outputs/unet_hu_dice_focal_epoch20_pretrained
+  save_dir: outputs/unet_hu_dice_focal_epoch30_pretrained
   num_workers: 0
 
 eval:
