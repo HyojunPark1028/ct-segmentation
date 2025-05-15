@@ -92,10 +92,6 @@ def train(cfg_path):
     td,ti=evaluate(model,ts_dl,device,cfg.data.threshold,vis=cfg.eval.visualize)
     print(f"TEST ➜ Dice:{td:.4f} IoU:{ti:.4f}")
 
-    # Save test result
-    test_result = {"test_dice":td,"test_iou":ti}
-    pd.DataFrame([test_result]).to_csv(os.path.join(cfg.train.save_dir, "test_result.csv"), index=False)
-
     coverage_stats = compute_mask_coverage(model, ts_dl, device, cfg.data.threshold)
     print("\n Mask Prediction Coverage:")
     for k, v in coverage_stats.items():
@@ -107,3 +103,7 @@ def train(cfg_path):
     # print total time
     elapsed = time.time() - start_time
     print(f"\n Total training time: {elapsed/60:.2f} minutes")
+
+    # Save test result
+    test_result = {"test_dice":td,"test_iou":ti,"elapsed_minutes": round(elapsed / 60, 2)}
+    pd.DataFrame([test_result]).to_csv(os.path.join(cfg.train.save_dir, "test_result.csv"), index=False)
