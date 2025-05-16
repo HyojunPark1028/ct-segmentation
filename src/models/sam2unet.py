@@ -24,8 +24,18 @@ class SAM2UNet(nn.Module):
         # SAM encoder 로드 (ViT-H)
         self.sam = sam_model_registry["vit_h"](checkpoint=checkpoint)
         self.encoder = self.sam.image_encoder
+        # self.encoder.eval()
+        # self.encoder.requires_grad_(False)  # Freeze
+
         self.encoder.eval()
-        self.encoder.requires_grad_(False)  # Freeze
+        # ❶ 전체를 먼저 freeze
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+
+        # ❷ 마지막 두 블록과 최종 LayerNorm만 풀어서 미세조정
+        for name, p in self.encoder.named_parameters():
+            if "blocks.10" in name or "blocks.11" in name or "norm" in name:
+                p.requires_grad = True        
 
         # SAM encoder output: (B, 256, 64, 64) → decoder에 맞게 channel projection
         self.projector = nn.Conv2d(256, 512, kernel_size=1)
