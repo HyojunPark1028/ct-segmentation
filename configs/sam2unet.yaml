@@ -1,0 +1,24 @@
+model:
+  name: sam2unet
+  use_pretrained: true
+  checkpoint: weights/sam_vit_h_4b8939.pth  # 사전학습된 SAM ViT-H 모델
+  img_size: null
+
+experiment:
+  name: sam2unet_hu_dice_focal_epoch30_pretrained
+  seed: 42
+
+data:
+  root_dir: "./src/content/data"
+  threshold: 0.3
+
+train:
+  batch_size: 4
+  epochs: 30
+  lr: 0.0001
+  loss: dice_focal
+  save_dir: outputs/sam2unet_hu_dice_focal_epoch30_pretrained
+  num_workers: 0
+
+eval:
+  visualize: true

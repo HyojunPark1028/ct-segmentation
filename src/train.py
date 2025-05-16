@@ -8,6 +8,7 @@ from .models.unet import UNet
 from .models.transunet import TransUNet
 from .models.swinunet import SwinUNet
 from .models.utransvision import UTransVision
+from .models.sam2unet import SAM2UNet
 from .dataset import NpySegDataset
 from .losses import get_loss
 from .evaluate import evaluate, compute_mask_coverage
@@ -56,6 +57,8 @@ def train(cfg_path):
         model = SwinUNet(img_size=cfg.model.img_size, num_classes=1, use_pretrained=use_pretrained).to(device)
     elif cfg.model.name.lower() == 'utransvision':
         model = UTransVision(img_size=cfg.model.img_size, num_classes=1, use_pretrained=use_pretrained).to(device)        
+    elif cfg.model.name.lower() == "sam2unet":
+        model = SAM2UNet(checkpoint=cfg.model.checkpoint).to(device)
     else:
         raise ValueError(f"Unsupported model name: {cfg.model.name}")
 
