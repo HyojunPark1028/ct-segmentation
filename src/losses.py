@@ -19,16 +19,5 @@ class DiceFocalLoss(nn.Module):
     def forward(self,p,t):
         return self.wd*self.d(p,t)+self.wf*self.f(p,t)
 
-# def get_loss():
-    # return DiceFocalLoss()
-
-def get_loss(pos_weight=2.0)    :
-    class DiceBCE(nn.Module):
-        def __init__(self, w_dice=0.4, w_bce=0.6):
-            super().__init__()
-            self.dice = DiceLoss()
-            self.bce = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(pos_weight))
-            self.wd, self.wb = w_dice, w_bce
-        def forward(self, p, t):
-            return self.wd*self.dice(p,t) + self.wb*self.bce(p,t)
-    return DiceBCE()
+def get_loss():
+    return DiceFocalLoss()
