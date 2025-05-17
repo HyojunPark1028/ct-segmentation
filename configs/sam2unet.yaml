@@ -5,7 +5,7 @@ model:
   img_size: null
 
 experiment:
-  name: sam2unet_hu__dice_focal_epoch30_pretrained
+  name: sam2unet_hu_focal_tversky_epoch30_pretrained
   seed: 42
 
 data:
@@ -16,8 +16,8 @@ train:
   batch_size: 4
   epochs: 30
   lr: 0.0001
-  loss: dice_bce
-  save_dir: outputs/sam2unet__dice_focal_epoch30_pretrained
+  loss: focal_tversky
+  save_dir: outputs/sam2unet_focal_tversky_epoch30_pretrained
   num_workers: 0
 
 eval:
