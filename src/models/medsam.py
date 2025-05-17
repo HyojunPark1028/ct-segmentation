@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from segment_anything.build_sam import sam_model_registry
 from .unet import ClassicUNet
 
