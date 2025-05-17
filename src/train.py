@@ -91,19 +91,19 @@ def train(cfg_path):
             pred = model(x)
             loss=criterion(pred,y);
             opt.zero_grad(); loss.backward(); 
-            if isinstance(model, MedSAM):
-                print("\n[ENCODER GRADIENT FLOW]")
-                grad_found = False
-                for name, param in model.sam.image_encoder.named_parameters():
-                    if param.requires_grad:
-                        if param.grad is None:
-                            print(f"{name:60s} | grad: None ❌")
-                        else:
-                            grad_val = param.grad.abs().mean().item()
-                            print(f"{name:60s} | grad mean: {grad_val:.6e}")
-                            grad_found = True
-                if not grad_found:
-                    print("No encoder param has gradient. Check freeze config or loss flow.")
+            # if isinstance(model, MedSAM):
+            #     print("\n[ENCODER GRADIENT FLOW]")
+            #     grad_found = False
+            #     for name, param in model.sam.image_encoder.named_parameters():
+            #         if param.requires_grad:
+            #             if param.grad is None:
+            #                 print(f"{name:60s} | grad: None ❌")
+            #             else:
+            #                 grad_val = param.grad.abs().mean().item()
+            #                 print(f"{name:60s} | grad mean: {grad_val:.6e}")
+            #                 grad_found = True
+            #     if not grad_found:
+            #         print("No encoder param has gradient. Check freeze config or loss flow.")
             opt.step(); run+=loss.item()
             loop.set_postfix(loss=loss.item(), mean_pred=torch.sigmoid(pred).mean().item())
         vd,vi=evaluate(model,vl_dl,device,cfg.data.threshold)
