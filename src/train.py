@@ -47,7 +47,7 @@ def train(cfg_path):
     # Dataset (pre‑split)
     # ✅ 모델에 따라 img_size 결정
     model_name = cfg.model.name.lower()
-    img_size = cfg.model.img_size if model_name in ["transunet", "swinunet"] else None
+    img_size = cfg.model.img_size if model_name in ["transunet", "swinunet", "medsam"] else None
     use_pretrained = cfg.model.get("use_pretrained", False)
 
     # Dataset (pre‑split)
