@@ -50,11 +50,12 @@ def train(cfg_path):
     model_name = cfg.model.name.lower()
     img_size = cfg.model.img_size if model_name in ["transunet", "swinunet", "medsam"] else None
     use_pretrained = cfg.model.get("use_pretrained", False)
+    normalize_type = "sam" if cfg.model.name.lower() in ["medsam", "sam2unet"] else "default"
 
     # Dataset (pre‑split)
-    tr_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'train'), augment=True, img_size=img_size)
-    vl_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'val'), img_size=img_size)
-    ts_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'test'), img_size=img_size)
+    tr_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'train'), augment=True, img_size=img_size, normalize_type=normalize_type)
+    vl_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'val'), img_size=img_size, normalize_type=normalize_type)
+    ts_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'test'), img_size=img_size, normalize_type=normalize_type)
     tr_dl=DataLoader(tr_ds,batch_size=cfg.train.batch_size,shuffle=True ,num_workers=cfg.train.num_workers, pin_memory=True, worker_init_fn=seed_worker, generator=g)
     vl_dl=DataLoader(vl_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
     ts_dl=DataLoader(ts_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)

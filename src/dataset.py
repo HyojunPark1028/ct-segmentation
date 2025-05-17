@@ -13,7 +13,7 @@ no_aug  = A.Compose([ToTensorV2()])
 
 class NpySegDataset(Dataset):
     """Loads npy slice + png mask from predefined split dir (train/val/test)"""
-    def __init__(self, split_dir: str, augment=False, img_size=None):
+    def __init__(self, split_dir: str, augment=False, img_size=None, normalize_type="default"):
         self.split_dir = split_dir
         self.img_dir = os.path.join(split_dir, 'images') if os.path.isdir(os.path.join(split_dir,'images')) else split_dir
         self.mask_dir= os.path.join(split_dir, 'masks')  if os.path.isdir(os.path.join(split_dir,'masks'))  else split_dir
@@ -34,6 +34,11 @@ class NpySegDataset(Dataset):
     def __getitem__(self, idx):
         fname = self.files[idx]
         img = np.load(os.path.join(self.img_dir, fname)).astype(np.float32)
+        if self.normalize_type == "sam":
+            img = img - img.min()
+            img = (img / (img.max() + 1e-8)) * 255.0
+        elif self.normalize_type == "default":
+            img = img / 255.0        
         msk = cv2.imread(os.path.join(self.mask_dir, fname.replace('.npy','.png')), cv2.IMREAD_GRAYSCALE)
         msk = (msk>127).astype(np.float32)
         img, msk = img[...,None], msk[...,None]
