@@ -43,9 +43,9 @@ class MedSAM(nn.Module):
         # 5. Decoder 가중치 초기화 (전체가 아닌 마지막 출력층만 제어)
         def init_final_conv(m):
             if isinstance(m, nn.Conv2d) and m.out_channels == out_channels:
-                nn.init.constant_(m.weight, 0)
+                nn.init.xavier_normal_(m.weight)
                 if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
+                    nn.init.constant_(m.bias, -4)
 
         self.decoder.final_conv.apply(init_final_conv)
 
