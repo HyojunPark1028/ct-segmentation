@@ -39,11 +39,13 @@ class MedSAM(nn.Module):
         # 4. decoder
         self.decoder = ClassicUNet(in_channels=256, out_channels=out_channels)
 
-        # 5. Decoder 마지막 출력층의 bias를 -1로 초기화하고, 업데이트 차단
+        # 5. Decoder 마지막 출력층의 bias 초기값 설정 및 학습 가능하도록 수정
         for m in self.decoder.modules():
             if isinstance(m, nn.Conv2d) and m.out_channels == out_channels:
                 if m.bias is not None:
-                    nn.init.constant_(m.bias, -0.5)  # 또는 -0.1 정도로 시작
+                    nn.init.constant_(m.bias, -0.1)  # 작은 음수로 초기화
+                    m.bias.requires_grad = True     # 반드시 학습되도록 설정
+
 
     def forward(self, x):
         if x.shape[1] == 1:
