@@ -4,7 +4,7 @@ model:
   img_size: 224
 
 experiment:
-  name: transunet_hu_focal_tversky_epoch30_pretrained
+  name: transunet_hu_dice_focal_epoch50_pretrained
   seed: 42
 
 data:
@@ -13,10 +13,10 @@ data:
 
 train:
   batch_size: 4
-  epochs: 30
+  epochs: 50
   lr: 0.0001
   loss: focal_tversky
-  save_dir: outputs/transunet_hu_focal_tversky_epoch30_pretrained
+  save_dir: outputs/transunet_hu_dice_focal_epoch50_pretrained
   num_workers: 4
   patience: 10
 
