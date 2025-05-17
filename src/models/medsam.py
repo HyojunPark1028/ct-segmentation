@@ -13,7 +13,8 @@ class ProjectorBlock(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
+            nn.GroupNorm(32, out_channels)
         )
 
     def forward(self, x):
@@ -40,13 +41,14 @@ class MedSAM(nn.Module):
         # 4. decoder
         self.decoder = ClassicUNet(in_channels=512, out_channels=out_channels)
 
-        def init_weights(m):
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight)
+        # 5. Decoder 가중치 초기화 (전체가 아닌 마지막 출력층만 제어)
+        def init_final_conv(m):
+            if isinstance(m, nn.Conv2d) and m.out_channels == out_channels:
+                nn.init.constant_(m.weight, 0)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, 0)
 
-        self.decoder.apply(init_weights)
+        self.decoder.final_conv.apply(init_final_conv)
 
     def forward(self, x):
         if x.shape[1] == 1:
@@ -71,5 +73,5 @@ class MedSAM(nn.Module):
         print(f"Shape: {out.shape}")
         print(f"Mean: {out.mean().item():.6f}, Std: {out.std().item():.6f}, Min: {out.min().item():.6f}, Max: {out.max().item():.6f}")
 
-        return out
+        return torch.sigmoid(out)
 
