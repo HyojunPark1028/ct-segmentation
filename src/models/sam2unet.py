@@ -54,8 +54,7 @@ class SAM2UNet(nn.Module):
         x_rgb = F.interpolate(x, size=(1024, 1024), mode='bilinear', align_corners=False)
         x_rgb = x_rgb.repeat(1, 3, 1, 1)  # Grayscale → 3채널 복제
 
-        with torch.no_grad():
-            feat = self.encoder(x_rgb)  # (B, 256, 64, 64)
+        feat = self.encoder(x_rgb)  # (B, 256, 64, 64)
 
         feat_proj = self.projector(feat)  # (B, 512, 64, 64)
         out = self.decoder(feat_proj)    # (B, 1, 64, 64) → 내부에서 upsample 진행
