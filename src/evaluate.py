@@ -1,5 +1,5 @@
 import torch, pandas as pd, matplotlib.pyplot as plt
-from models.medsam import MedSAM  # MedSAM 분기 처리를 위해 import
+from .models.medsam import MedSAM  # MedSAM 분기 처리를 위해 import
 
 def _metric(pred, tgt, thr):
     p=(pred>thr).float(); inter=(p*tgt).sum(); union=p.sum()+tgt.sum()-inter
