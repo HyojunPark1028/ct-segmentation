@@ -91,15 +91,16 @@ def train(cfg_path):
             pred = model(x)
             loss=criterion(pred,y);
             opt.zero_grad(); loss.backward(); opt.step(); run+=loss.item()
-            loop.set_postfix(loss=loss.item(), mean_pred=torch.sigmoid(pred).mean().item())
+            pred_cpu = pred.detach().cpu()
+            loop.set_postfix(loss=loss.item(), mean_pred=torch.sigmoid(pred_cpu).mean().item())
+            del pred, loss
+            torch.cuda.empty_cache()
+            gc.collect()
         vd,vi=evaluate(model,vl_dl,device,cfg.data.threshold)
-        torch.cuda.empty_cache()
-        gc.collect()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         row=dict(epoch=ep+1,train_loss=run/len(tr_dl),val_dice=vd,val_iou=vi,timestamp=timestamp)
         history.append(row); print(row)
         print(f"[Epoch {ep+1}] loss: {row['train_loss']:.4f}, val_dice: {vd:.4f}, val_iou: {vi:.4f}")
-        print(f"[SIGMOID DEBUG] pred mean: {pred.mean().item():.4f}, max: {pred.max().item():.4f}, min: {pred.min().item():.4f}")
 
         # Save best model
         if vd > best_dice:
