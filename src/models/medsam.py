@@ -46,7 +46,8 @@ class MedSAM(nn.Module):
             x = x.repeat(1, 3, 1, 1)
 
         # encoder 출력: B x 256 x H/16 x W/16
-        feats = self.sam.image_encoder(x)
+        feats = self.encoder(x) 
+        # feats = self.sam.image_encoder(x)
 
         # projector 통해 해상도 유지
         proj = self.projector(feats)
