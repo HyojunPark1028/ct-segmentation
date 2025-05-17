@@ -5,14 +5,14 @@ from segment_anything.build_sam import sam_model_registry
 from .unet import ClassicUNet
 
 class ProjectorBlock(nn.Module):
-    def __init__(self, in_channels=256, out_channels=512):
+    def __init__(self, in_channels=256, out_channels=256):
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
+            nn.GroupNorm(8, out_channels),  # 안정적 정규화
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
+            nn.GroupNorm(8, out_channels),
             nn.ReLU(inplace=True)
         )
 
@@ -27,20 +27,19 @@ class MedSAM(nn.Module):
         self.sam = sam_model_registry["vit_b"](checkpoint=checkpoint)
 
         # 2. encoder 일부 fine-tuning 허용
-        # self.encoder = self.sam.image_encoder
         for p in self.sam.image_encoder.parameters():
             p.requires_grad = False
-        for name, p in self.sam.image_encoder.named_parameters():          
+        for name, p in self.sam.image_encoder.named_parameters():
             if any(k in name for k in ["blocks.9", "blocks.10", "blocks.11", "norm"]):
                 p.requires_grad = True
 
-        # 3. projector
-        self.projector = ProjectorBlock(in_channels=256, out_channels=512)
+        # 3. projector: out_channels = 256
+        self.projector = ProjectorBlock(in_channels=256, out_channels=256)
 
-        # 4. decoder
-        self.decoder = ClassicUNet(in_channels=512, out_channels=out_channels)
+        # 4. decoder: in_channels = 256
+        self.decoder = ClassicUNet(in_channels=256, out_channels=out_channels)
 
-        # 5. Decoder 가중치 초기화 (전체가 아닌 마지막 출력층만 제어)
+        # 5. Decoder 마지막 출력층 가중치 초기화
         def init_final_conv(m):
             if isinstance(m, nn.Conv2d) and m.out_channels == out_channels:
                 nn.init.xavier_normal_(m.weight)
@@ -72,5 +71,4 @@ class MedSAM(nn.Module):
         print(f"Shape: {out.shape}")
         print(f"Mean: {out.mean().item():.6f}, Std: {out.std().item():.6f}, Min: {out.min().item():.6f}, Max: {out.max().item():.6f}")
 
-        return torch.sigmoid(out)
-
+        return out  # sigmoid는 evaluate/eval loop에서 적용
