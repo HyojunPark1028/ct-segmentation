@@ -22,13 +22,22 @@ class ProjectorBlock(nn.Module):
 class MedSAM(nn.Module):
     def __init__(self, checkpoint: str, in_channels: int = 1, out_channels: int = 1, img_size: int = 512):
         super().__init__()
-        # ViT-B 기반 SAM encoder 불러오기
+
+        # 1. SAM ViT-B encoder 로드
         self.sam = sam_model_registry["vit_b"](checkpoint=checkpoint)
 
-        # projector: encoder output → decoder input으로 연결
+        # 2. encoder 일부 fine-tuning 허용
+        self.encoder = self.sam.image_encoder
+        for p in self.encoder.parameters():
+            p.requires_grad = False
+        for name, p in self.encoder.named_parameters():
+            if any(k in name for k in ["blocks.9", "blocks.10", "blocks.11", "norm"]):
+                p.requires_grad = True
+
+        # 3. projector
         self.projector = ProjectorBlock(in_channels=256, out_channels=512)
 
-        # Classic U-Net decoder
+        # 4. decoder
         self.decoder = ClassicUNet(in_channels=512, out_channels=out_channels)
 
     def forward(self, x):
