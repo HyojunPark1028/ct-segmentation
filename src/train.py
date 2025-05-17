@@ -1,4 +1,5 @@
 import time
+import gc
 import os, torch, pandas as pd
 import random, numpy as np
 from omegaconf import OmegaConf
@@ -91,6 +92,8 @@ def train(cfg_path):
             opt.zero_grad(); loss.backward(); opt.step(); run+=loss.item()
             loop.set_postfix(loss=loss.item(), mean_pred=torch.sigmoid(pred).mean().item())
         vd,vi=evaluate(model,vl_dl,device,cfg.data.threshold)
+        torch.cuda.empty_cache()
+        gc.collect()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         row=dict(epoch=ep+1,train_loss=run/len(tr_dl),val_dice=vd,val_iou=vi,timestamp=timestamp)
         history.append(row); print(row)
