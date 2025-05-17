@@ -100,11 +100,21 @@ def train(cfg_path):
             del pred, loss
             torch.cuda.empty_cache()
             gc.collect()
+
+        # Validation Loss 계산
+        model.eval(); vloss = 0
+        with torch.no_grad():
+            for x_val, y_val in vl_dl:
+                x_val, y_val = x_val.to(device), y_val.to(device)
+                v_pred = model(x_val)
+                v_loss = criterion(v_pred, y_val)
+                vloss += v_loss.item()
+
         vd,vi=evaluate(model,vl_dl,device,cfg.data.threshold)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        row=dict(epoch=ep+1,train_loss=run/len(tr_dl),val_dice=vd,val_iou=vi,timestamp=timestamp)
+        row=dict(epoch=ep+1,train_loss=run/len(tr_dl),val_loss=vloss/len(vl_dl),val_dice=vd,val_iou=vi,timestamp=timestamp)
         history.append(row); print(row)
-        print(f"[Epoch {ep+1}] loss: {row['train_loss']:.4f}, val_dice: {vd:.4f}, val_iou: {vi:.4f}")
+        print(f"[Epoch {ep+1}] loss: {row['train_loss']:.4f}, val_loss: {row['val_loss']:.4f}, val_dice: {vd:.4f}, val_iou: {vi:.4f}")
 
         # Save best model
         if vd > best_dice:
