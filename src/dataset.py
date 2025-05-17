@@ -3,6 +3,7 @@ from torch.utils.data import Dataset
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
+A.set_seed(42)
 
 base_aug = A.Compose([
     A.HorizontalFlip(p=0.5),

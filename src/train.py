@@ -1,5 +1,6 @@
 import time
 import os, torch, pandas as pd
+import random, numpy as np
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -14,7 +15,6 @@ from .losses import get_loss
 from .evaluate import evaluate, compute_mask_coverage
 
 def seed_everything(seed=42):
-    import random, numpy as np
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     random.seed(seed)
     np.random.seed(seed)
@@ -26,6 +26,7 @@ def seed_everything(seed=42):
     torch.backends.cudnn.benchmark = False
     torch.use_deterministic_algorithms(True)
 
+
 def train(cfg_path):
     start_time=time.time()
     cfg=OmegaConf.load(cfg_path); seed_everything(cfg.experiment.seed); os.makedirs(cfg.train.save_dir, exist_ok=True)
@@ -33,6 +34,16 @@ def train(cfg_path):
 
     # Save config snapshot
     OmegaConf.save(cfg, os.path.join(cfg.train.save_dir, "used_config.yaml"))
+
+    # Seed-safe DataLoader 세팅
+    def seed_worker(worker_id):
+        worker_seed = cfg.experiment.seed + worker_id
+        np.random.seed(worker_seed)
+        import random
+        random.seed(worker_seed)
+
+    g = torch.Generator()
+    g.manual_seed(cfg.experiment.seed)
 
     # Dataset (pre‑split)
     # ✅ 모델에 따라 img_size 결정
@@ -44,7 +55,7 @@ def train(cfg_path):
     tr_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'train'), augment=True, img_size=img_size)
     vl_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'val'), img_size=img_size)
     ts_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'test'), img_size=img_size)
-    tr_dl=DataLoader(tr_ds,batch_size=cfg.train.batch_size,shuffle=True ,num_workers=cfg.train.num_workers)
+    tr_dl=DataLoader(tr_ds,batch_size=cfg.train.batch_size,shuffle=True ,num_workers=cfg.train.num_workers, pin_memory=True, worker_init_fn=seed_worker, generator=g)
     vl_dl=DataLoader(vl_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
     ts_dl=DataLoader(ts_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
 
