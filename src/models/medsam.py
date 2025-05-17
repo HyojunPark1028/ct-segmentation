@@ -71,5 +71,5 @@ class MedSAM(nn.Module):
         # print(f"Shape: {out.shape}")
         # print(f"Mean: {out.mean().item():.6f}, Std: {out.std().item():.6f}, Min: {out.min().item():.6f}, Max: {out.max().item():.6f}")
 
-        return out
+        return torch.sigmoid(out)
 
