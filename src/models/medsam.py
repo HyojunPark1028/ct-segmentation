@@ -40,6 +40,14 @@ class MedSAM(nn.Module):
         # 4. decoder
         self.decoder = ClassicUNet(in_channels=512, out_channels=out_channels)
 
+        def init_weights(m):
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+        self.decoder.apply(init_weights)
+        
     def forward(self, x):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
