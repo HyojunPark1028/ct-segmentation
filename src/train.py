@@ -133,8 +133,19 @@ def train(cfg_path):
 
     # final test evaluation using best model + visualize
     model.load_state_dict(torch.load(os.path.join(cfg.train.save_dir, "model_best.pth")))
+    model.eval(); test_loss = 0
+    test_start = time.time()
+    with torch.no_grad():
+        for x_test, y_test in ts_dl:
+            x_test, y_test = x_test.to(device), y_test.to(device)
+            pred = model(x_test)
+            loss = criterion(pred, y_test)
+            test_loss += loss.item()
+    test_end = time.time()
+    test_elapsed = test_end - test_start
+
     td,ti=evaluate(model,ts_dl,device,cfg.data.threshold,vis=cfg.eval.visualize)
-    print(f"TEST ➜ Dice:{td:.4f} IoU:{ti:.4f}")
+    print(f"TEST ➜ Dice:{td:.4f} IoU:{ti:.4f} Test Loss:{test_loss/len(ts_dl):.4f} Time:{test_elapsed:.2f}s")
 
     coverage_stats = compute_mask_coverage(model, ts_dl, device, cfg.data.threshold)
     print("\n Mask Prediction Coverage:")
@@ -148,6 +159,18 @@ def train(cfg_path):
     elapsed = time.time() - start_time
     print(f"\n Total training time: {elapsed/60:.2f} minutes")
 
+    # 파라미터 수
+    param_count = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
     # Save test result
-    test_result = {"test_dice":td,"test_iou":ti,"elapsed_minutes": round(elapsed / 60, 2)}
+    test_result = {
+        "test_dice": td,
+        "test_iou": ti,
+        "test_loss": round(test_loss / len(ts_dl), 4),
+        "test_inference_time_sec": round(test_elapsed, 2),
+        "elapsed_minutes": round(elapsed / 60, 2),
+        "param_count": param_count
+    }
+
+    # Save test result
     pd.DataFrame([test_result]).to_csv(os.path.join(cfg.train.save_dir, "test_result.csv"), index=False)
