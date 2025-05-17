@@ -13,8 +13,7 @@ class ProjectorBlock(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-            nn.GroupNorm(32, out_channels)
+            nn.ReLU(inplace=True)
         )
 
     def forward(self, x):
