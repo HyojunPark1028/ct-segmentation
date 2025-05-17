@@ -76,6 +76,8 @@ def train(cfg_path):
 
     history=[]
     best_dice = 0
+    patience = cfg.train.get("patience", 10)
+    counter = 0 # early stopping trigger
     for ep in range(cfg.train.epochs):
         model.train(); run=0
         loop = tqdm(tr_dl, desc=f"Epoch {ep+1}/{cfg.train.epochs}", leave=False)
@@ -95,6 +97,13 @@ def train(cfg_path):
         if vd > best_dice:
             best_dice = vd
             torch.save(model.state_dict(), os.path.join(cfg.train.save_dir, "model_best.pth"))
+            counter = 0 # reset patience counter
+        else:
+            counter += 1
+            print(f"No improvement in val_dice. EarlyStopping counter: {counter}/{patience}")
+            if counter >= patience:
+                print("Early stopping triggered.")
+                break
 
     # save metrics
     pd.DataFrame(history).to_csv(os.path.join(cfg.train.save_dir,'metrics.csv'),index=False)

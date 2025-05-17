@@ -18,6 +18,7 @@ train:
   loss: focal_tversky
   save_dir: outputs/utransvision_hu_focal_tversky_epoch30_pretrained
   num_workers: 4
+  patience: 10
 
 eval:
   visualize: true
