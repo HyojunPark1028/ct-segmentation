@@ -1,0 +1,45 @@
+import torch
+import torch.nn as nn
+from segment_anything.build_sam import sam_model_registry
+from .unet import ClassicUNet
+
+class ProjectorBlock(nn.Module):
+    def __init__(self, in_channels=256, out_channels=512):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
+            nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, x):
+        return self.block(x)
+
+class MedSAM(nn.Module):
+    def __init__(self, checkpoint: str, in_channels: int = 1, out_channels: int = 1, img_size: int = 512):
+        super().__init__()
+        # ViT-B 기반 SAM encoder 불러오기
+        self.sam = sam_model_registry["vit_b"](checkpoint=checkpoint)
+
+        # projector: encoder output → decoder input으로 연결
+        self.projector = ProjectorBlock(in_channels=256, out_channels=512)
+
+        # Classic U-Net decoder
+        self.decoder = ClassicUNet(in_channels=512, out_channels=out_channels)
+
+    def forward(self, x):
+        # 입력이 grayscale(1채널)일 경우 → RGB로 확장
+        if x.shape[1] == 1:
+            x = x.repeat(1, 3, 1, 1)
+
+        # encoder 출력: B x 256 x H/16 x W/16
+        feats = self.sam.image_encoder(x)
+
+        # projector 통해 해상도 유지
+        proj = self.projector(feats)
+
+        # decoder 통해 최종 segmentation 출력
+        return self.decoder(proj)

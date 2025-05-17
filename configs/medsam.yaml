@@ -1,0 +1,28 @@
+model:
+  name: medsam
+  img_size: 512
+  patch_size: 32  # 기존 16에서 32로 증가
+  checkpoint: weights/medsam_vit_b.pth  # 메모리 절감을 위한 ViT-B 사용
+  grad_checkpointing: true
+  freeze_layers: 0  # 완전 fine-tune (일부 freeze 원할 경우 숫자 조정)
+
+experiment:
+  name: medsam_hu_focal_tversky_epoch30_pretrained
+  seed: 42
+
+data:
+  root_dir: "C:/Users/Hyojun Park/Paper/ct-segmentation/content/data"
+  threshold: 0.3
+
+train:
+  batch_size: 4
+  epochs: 30
+  lr: 0.0001
+  loss: focal_tversky
+  save_dir: outputs/medsam_focal_tversky_epoch30_pretrained
+  num_workers: 4
+  patience: 10
+  use_amp: true
+
+eval:
+  visualize: true

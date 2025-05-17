@@ -20,6 +20,7 @@ train:
   save_dir: outputs/sam2unet_focal_tversky_epoch30_pretrained
   num_workers: 4
   patience: 10
+  use_amp: true
 
 eval:
   visualize: true
