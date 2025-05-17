@@ -31,6 +31,8 @@ class MedSAM(nn.Module):
         for p in self.encoder.parameters():
             p.requires_grad = False
         for name, p in self.encoder.named_parameters():
+            if p.requires_grad:
+                print(name)            
             if any(k in name for k in ["blocks.9", "blocks.10", "blocks.11", "norm"]):
                 p.requires_grad = True
 
