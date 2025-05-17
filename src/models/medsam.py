@@ -30,11 +30,12 @@ class MedSAM(nn.Module):
         self.encoder = self.sam.image_encoder
         for p in self.encoder.parameters():
             p.requires_grad = False
-        for name, p in self.encoder.named_parameters():
-            if p.requires_grad:
-                print(name)            
+        for name, p in self.encoder.named_parameters():          
             if any(k in name for k in ["blocks.9", "blocks.10", "blocks.11", "norm"]):
                 p.requires_grad = True
+        for name, p in self.encoder.named_parameters():
+            if p.requires_grad:
+                print("✅ requires_grad:", name)
 
         # 3. projector
         self.projector = ProjectorBlock(in_channels=256, out_channels=512)
