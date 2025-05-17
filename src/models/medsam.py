@@ -30,7 +30,7 @@ class MedSAM(nn.Module):
         for p in self.sam.image_encoder.parameters():
             p.requires_grad = False
         for name, p in self.sam.image_encoder.named_parameters():
-            if any(k in name for k in ["blocks.6", "blocks.7", "blocks.8", "blocks.9", "blocks.10", "blocks.11", "norm"]):
+            if any(k in name for k in ["blocks.4", "blocks.5", "blocks.6", "blocks.7", "blocks.8", "blocks.9", "blocks.10", "blocks.11", "norm"]):
                 p.requires_grad = True
 
         # 3. projector
@@ -40,11 +40,13 @@ class MedSAM(nn.Module):
         self.decoder = ClassicUNet(in_channels=256, out_channels=out_channels)
 
         # 5. Decoder 마지막 출력층의 bias 초기값 설정 및 학습 가능하도록 수정
+        self.final_conv_ref = None
         for m in self.decoder.modules():
             if isinstance(m, nn.Conv2d) and m.out_channels == out_channels:
                 if m.bias is not None:
-                    nn.init.constant_(m.bias, -0.1)  # 작은 음수로 초기화
-                    m.bias.requires_grad = True     # 반드시 학습되도록 설정
+                    nn.init.constant_(m.bias, 0.0)
+                    m.bias.requires_grad = True
+                    self.final_conv_ref = m
 
 
     def forward(self, x):
@@ -70,10 +72,10 @@ class MedSAM(nn.Module):
         print(f"Shape: {out.shape}")
         print(f"Mean: {out.mean().item():.6f}, Std: {out.std().item():.6f}, Min: {out.min().item():.6f}, Max: {out.max().item():.6f}")
 
-        # 🧠 D. Decoder bias 확인 (gradient collapse 방지 모니터링)
-        if hasattr(self.decoder, "final_conv"):
-            bias_val = self.decoder.final_conv.bias
-            if bias_val is not None:
-                print(f"[DECODER BIAS MEAN]: {bias_val.data.mean().item():.6f}")
+        if self.final_conv_ref is not None:
+            print(f"[DECODER BIAS MEAN]: {self.final_conv_ref.bias.data.mean().item():.6f}")
+
+        pred = torch.sigmoid(out)
+        print(f"[SIGMOID MEAN]: {pred.mean().item():.6f}")
 
         return out  # sigmoid는 loss나 eval 쪽에서 처리
