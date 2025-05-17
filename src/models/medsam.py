@@ -43,9 +43,7 @@ class MedSAM(nn.Module):
         for m in self.decoder.modules():
             if isinstance(m, nn.Conv2d) and m.out_channels == out_channels:
                 if m.bias is not None:
-                    nn.init.constant_(m.bias, -1)
-                    m.bias.requires_grad = False
-
+                    nn.init.constant_(m.bias, -0.5)  # 또는 -0.1 정도로 시작
 
     def forward(self, x):
         if x.shape[1] == 1:
