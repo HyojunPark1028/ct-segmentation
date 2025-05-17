@@ -55,27 +55,27 @@ class MedSAM(nn.Module):
 
         # 🔵 A. Encoder 출력 확인
         feats = self.sam.image_encoder(x)
-        print(f"\n[ENCODER OUTPUT]")
-        print(f"Shape: {feats.shape}")
-        print(f"Mean: {feats.mean().item():.6f}, Std: {feats.std().item():.6f}, Min: {feats.min().item():.6f}, Max: {feats.max().item():.6f}")
+        # print(f"\n[ENCODER OUTPUT]")
+        # print(f"Shape: {feats.shape}")
+        # print(f"Mean: {feats.mean().item():.6f}, Std: {feats.std().item():.6f}, Min: {feats.min().item():.6f}, Max: {feats.max().item():.6f}")
 
         # 🟢 B. Projector 출력 확인
         proj = self.projector(feats)
-        print(f"[PROJECTOR OUTPUT]")
-        print(f"Shape: {proj.shape}")
-        print(f"Mean: {proj.mean().item():.6f}, Std: {proj.std().item():.6f}, Min: {proj.min().item():.6f}, Max: {proj.max().item():.6f}")
+        # print(f"[PROJECTOR OUTPUT]")
+        # print(f"Shape: {proj.shape}")
+        # print(f"Mean: {proj.mean().item():.6f}, Std: {proj.std().item():.6f}, Min: {proj.min().item():.6f}, Max: {proj.max().item():.6f}")
 
         # 🟣 C. Decoder 출력 확인
         out = self.decoder(proj)
         out = F.interpolate(out, size=x.shape[2:], mode='bilinear', align_corners=False)
-        print(f"[DECODER OUTPUT]")
-        print(f"Shape: {out.shape}")
-        print(f"Mean: {out.mean().item():.6f}, Std: {out.std().item():.6f}, Min: {out.min().item():.6f}, Max: {out.max().item():.6f}")
+        # print(f"[DECODER OUTPUT]")
+        # print(f"Shape: {out.shape}")
+        # print(f"Mean: {out.mean().item():.6f}, Std: {out.std().item():.6f}, Min: {out.min().item():.6f}, Max: {out.max().item():.6f}")
 
-        if self.final_conv_ref is not None:
-            print(f"[DECODER BIAS MEAN]: {self.final_conv_ref.bias.data.mean().item():.6f}")
+        # if self.final_conv_ref is not None:
+        #     print(f"[DECODER BIAS MEAN]: {self.final_conv_ref.bias.data.mean().item():.6f}")
 
-        pred = torch.sigmoid(out)
-        print(f"[SIGMOID MEAN]: {pred.mean().item():.6f}")
+        # pred = torch.sigmoid(out)
+        # print(f"[SIGMOID MEAN]: {pred.mean().item():.6f}")
 
         return out  # sigmoid는 loss나 eval 쪽에서 처리
