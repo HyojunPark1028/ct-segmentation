@@ -26,6 +26,11 @@ def seed_everything(seed=42):
     torch.backends.cudnn.benchmark = False
     torch.use_deterministic_algorithms(True)
 
+# Seed-safe DataLoader 세팅
+def seed_worker(worker_id):
+    worker_seed = 42 + worker_id
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
 
 def train(cfg_path):
     start_time=time.time()
@@ -34,13 +39,6 @@ def train(cfg_path):
 
     # Save config snapshot
     OmegaConf.save(cfg, os.path.join(cfg.train.save_dir, "used_config.yaml"))
-
-    # Seed-safe DataLoader 세팅
-    def seed_worker(worker_id):
-        worker_seed = cfg.experiment.seed + worker_id
-        np.random.seed(worker_seed)
-        import random
-        random.seed(worker_seed)
 
     g = torch.Generator()
     g.manual_seed(cfg.experiment.seed)
