@@ -41,26 +41,26 @@ class MedSAM(nn.Module):
         self.decoder = ClassicUNet(in_channels=512, out_channels=out_channels)
 
     def forward(self, x):
-        # 입력이 grayscale(1채널)일 경우 → RGB로 확장
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
 
-        # encoder 출력: B x 256 x H/16 x W/16
-        feats = self.sam.image_encoder(x) 
-        # feats = self.sam.image_encoder(x)
+        # 🔵 A. Encoder 출력 확인
+        feats = self.sam.image_encoder(x)
+        print(f"\n[ENCODER OUTPUT]")
+        print(f"Shape: {feats.shape}")
+        print(f"Mean: {feats.mean().item():.6f}, Std: {feats.std().item():.6f}, Min: {feats.min().item():.6f}, Max: {feats.max().item():.6f}")
 
-        # ✅ 1-1. 출력 통계 확인
-        print(f"[DEBUG] Encoder Output - mean: {feats.mean().item():.4f}, std: {feats.std().item():.4f}, min: {feats.min().item():.4f}, max: {feats.max().item():.4f}")        
-
-        # projector 통해 해상도 유지
+        # 🟢 B. Projector 출력 확인
         proj = self.projector(feats)
+        print(f"[PROJECTOR OUTPUT]")
+        print(f"Shape: {proj.shape}")
+        print(f"Mean: {proj.mean().item():.6f}, Std: {proj.std().item():.6f}, Min: {proj.min().item():.6f}, Max: {proj.max().item():.6f}")
 
-        # decoder 통해 최종 segmentation 출력
-        out = self.decoder(proj)  # (B, 1, H/16, W/16)
+        # 🟣 C. Decoder 출력 확인
+        out = self.decoder(proj)
         out = F.interpolate(out, size=x.shape[2:], mode='bilinear', align_corners=False)
-        
-        # ✅ 1-2. decoder 출력도 함께 체크
-        print(f"[DEBUG] Decoder Output - mean: {out.mean().item():.4f}, std: {out.std().item():.4f}, min: {out.min().item():.4f}, max: {out.max().item():.4f}")
-        
-        return out
+        print(f"[DECODER OUTPUT]")
+        print(f"Shape: {out.shape}")
+        print(f"Mean: {out.mean().item():.6f}, Std: {out.std().item():.6f}, Min: {out.min().item():.6f}, Max: {out.max().item():.6f}")
 
+        return out

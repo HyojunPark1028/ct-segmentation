@@ -91,15 +91,14 @@ def train(cfg_path):
             pred = model(x)
             loss=criterion(pred,y);
             opt.zero_grad(); loss.backward(); 
-            # ✅ 2-1. encoder grad 흐름 체크
-            print("[DEBUG] Gradient flow in encoder:")
+            print("\n[ENCODER GRADIENT FLOW]")
             for name, param in model.sam.image_encoder.named_parameters():
                 if param.requires_grad:
-                    grad = param.grad
-                    if grad is not None:
-                        print(f"{name:50s} | grad mean: {grad.abs().mean().item():.6f}")
+                    if param.grad is None:
+                        print(f"{name:60s} | grad: None ❌")
                     else:
-                        print(f"{name:50s} | grad: None ❌")
+                        print(f"{name:60s} | grad mean: {param.grad.abs().mean().item():.6e}")
+
             opt.step(); run+=loss.item()
             loop.set_postfix(loss=loss.item(), mean_pred=torch.sigmoid(pred).mean().item())
         vd,vi=evaluate(model,vl_dl,device,cfg.data.threshold)
