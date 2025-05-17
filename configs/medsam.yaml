@@ -1,6 +1,6 @@
 model:
   name: medsam
-  img_size: 512
+  img_size: 1024
   patch_size: 32  # 기존 16에서 32로 증가
   checkpoint: weights/medsam_vit_b.pth  # 메모리 절감을 위한 ViT-B 사용
   grad_checkpointing: true
