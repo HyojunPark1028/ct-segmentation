@@ -49,11 +49,18 @@ class MedSAM(nn.Module):
         feats = self.sam.image_encoder(x) 
         # feats = self.sam.image_encoder(x)
 
+        # ✅ 1-1. 출력 통계 확인
+        print(f"[DEBUG] Encoder Output - mean: {feats.mean().item():.4f}, std: {feats.std().item():.4f}, min: {feats.min().item():.4f}, max: {feats.max().item():.4f}")        
+
         # projector 통해 해상도 유지
         proj = self.projector(feats)
 
         # decoder 통해 최종 segmentation 출력
         out = self.decoder(proj)  # (B, 1, H/16, W/16)
         out = F.interpolate(out, size=x.shape[2:], mode='bilinear', align_corners=False)
+        
+        # ✅ 1-2. decoder 출력도 함께 체크
+        print(f"[DEBUG] Decoder Output - mean: {out.mean().item():.4f}, std: {out.std().item():.4f}, min: {out.min().item():.4f}, max: {out.max().item():.4f}")
+        
         return out
 
