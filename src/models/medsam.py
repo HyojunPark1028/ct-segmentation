@@ -42,4 +42,7 @@ class MedSAM(nn.Module):
         proj = self.projector(feats)
 
         # decoder 통해 최종 segmentation 출력
-        return self.decoder(proj)
+        out = self.decoder(proj)  # (B, 1, H/16, W/16)
+        out = F.interpolate(out, size=x.shape[2:], mode='bilinear', align_corners=False)
+        return out
+
