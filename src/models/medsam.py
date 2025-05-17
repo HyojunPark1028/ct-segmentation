@@ -27,10 +27,10 @@ class MedSAM(nn.Module):
         self.sam = sam_model_registry["vit_b"](checkpoint=checkpoint)
 
         # 2. encoder 일부 fine-tuning 허용
-        self.encoder = self.sam.image_encoder
-        for p in self.encoder.parameters():
+        # self.encoder = self.sam.image_encoder
+        for p in self.sam.image_encoder.parameters():
             p.requires_grad = False
-        for name, p in self.encoder.named_parameters():          
+        for name, p in self.sam.image_encoder.named_parameters():          
             if any(k in name for k in ["blocks.9", "blocks.10", "blocks.11", "norm"]):
                 p.requires_grad = True
 
@@ -46,7 +46,7 @@ class MedSAM(nn.Module):
             x = x.repeat(1, 3, 1, 1)
 
         # encoder 출력: B x 256 x H/16 x W/16
-        feats = self.encoder(x) 
+        feats = self.sam.image_encoder(x) 
         # feats = self.sam.image_encoder(x)
 
         # projector 통해 해상도 유지
