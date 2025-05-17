@@ -18,6 +18,7 @@ class NpySegDataset(Dataset):
         self.img_dir = os.path.join(split_dir, 'images') if os.path.isdir(os.path.join(split_dir,'images')) else split_dir
         self.mask_dir= os.path.join(split_dir, 'masks')  if os.path.isdir(os.path.join(split_dir,'masks'))  else split_dir
         self.files = sorted([f for f in os.listdir(self.img_dir) if f.endswith('.npy')])
+        self.normalize_type = normalize_type
 
         # ✅ Resize if specified
         resize = [A.Resize(img_size, img_size)] if img_size else []
