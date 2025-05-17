@@ -90,7 +90,9 @@ def train(cfg_path):
             x,y=x.to(device),y.to(device)
             pred = model(x)
             loss=criterion(pred,y);
-            opt.zero_grad(); loss.backward(); opt.step(); run+=loss.item()
+            opt.zero_grad(); loss.backward(); 
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            opt.step(); run+=loss.item()
             pred_cpu = pred.detach().cpu()
             loop.set_postfix(loss=loss.item(), mean_pred=torch.sigmoid(pred_cpu).mean().item())
             del pred, loss
