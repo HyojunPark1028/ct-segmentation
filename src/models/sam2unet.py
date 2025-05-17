@@ -22,7 +22,7 @@ class ProjectorBlock(nn.Module):
 
 
 class SAM2UNet(nn.Module):
-    def __init__(self, checkpoint: str, in_channels: int = 1, out_channels: int = 1, img_size: int = 512):
+    def __init__(self, checkpoint: str, in_channels: int = 1, out_channels: int = 1, img_size: int = 1024):
         """
         SAM2-UNet: SAM encoder (ViT-H) + 강화된 projector + ClassicUNet decoder
         AMP 없이 구성. 일부 encoder만 fine-tune
