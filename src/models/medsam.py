@@ -45,6 +45,7 @@ class MedSAM(nn.Module):
                 nn.init.xavier_normal_(m.weight)
                 if m.bias is not None:
                     nn.init.constant_(m.bias, -1)
+                    m.bias.requires_grad = False  # 🚫 학습 방지
 
         self.decoder.final_conv.apply(init_final_conv)
 
