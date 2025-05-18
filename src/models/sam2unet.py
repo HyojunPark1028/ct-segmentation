@@ -86,7 +86,7 @@ class SAM2UNet(nn.Module):
 
         if raw_embed.shape[1] != num_patches:
             interpolated_embed = F.interpolate(
-                raw_embed.transpose(0, 2, 1),     # [1, C, L]
+                raw_embed.permute(0, 2, 1),     # [1, C, L]
                 size=num_patches,
                 mode="nearest"
             ).permute(0, 2, 1)                  # [1, num_patches, C]
