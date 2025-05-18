@@ -65,7 +65,7 @@ class UTransVision(nn.Module):
     def interpolate_pos_encoding(self, x, H, W):
         N = self.pos_embed.shape[1]
         pos_embed = self.pos_embed.reshape(1, int(N**0.5), int(N**0.5), -1).permute(0, 3, 1, 2)  # [1, C, H, W]
-        pos_embed = F.interpolate(pos_embed, size=(H, W), mode='bicubic', align_corners=False)
+        pos_embed = F.interpolate(pos_embed, size=(H, W), mode='bilinear', align_corners=False)
         pos_embed = pos_embed.permute(0, 2, 3, 1).reshape(1, H * W, -1)
         return pos_embed
 
