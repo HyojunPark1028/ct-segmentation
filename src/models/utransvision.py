@@ -85,9 +85,10 @@ class UTransVision(nn.Module):
         x_t = self.transformer.norm(x_t)
         x_t = x_t.transpose(1, 2).reshape(B, 768, H, W)  # [B, 768, H, W]
 
-        x_fused = torch.cat([x_t, x4], dim=1)  # Feature fusion
+        x4_resized = F.interpolate(x4, size=(H, W), mode='bilinear', align_corners=False)
+        x_fused = torch.cat([x_t, x4_resized], dim=1)  # Feature fusion
 
-        d4 = self.decoder4(x_fused, x4)
+        d4 = self.decoder4(x_fused, x4_resized)
         d3 = self.decoder3(d4, x3)
         d2 = self.decoder2(d3, x2)
         d1 = self.decoder1(d2, x1)
