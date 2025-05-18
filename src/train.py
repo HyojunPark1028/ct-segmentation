@@ -77,7 +77,7 @@ def train(cfg_path):
     elif cfg.model.name.lower() == "medsam":
         model = MedSAM(checkpoint=cfg.model.checkpoint).to(device)
     elif cfg.model.name.lower() == "medsam2":
-        model = MedSAM2(checkpoint=cfg.model.checkpoint,device=device).to(device)   
+        model = MedSAM2(checkpoint=cfg.model.checkpoint).to(device)   
     else:
         raise ValueError(f"Unsupported model name: {cfg.model.name}")
 
