@@ -27,10 +27,10 @@ class UpBlock(nn.Module):
         self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
         self.conv = nn.Sequential(
             nn.Conv2d(out_channels + skip_channels, out_channels, 3, padding=1),
-            nn.BatchNorm2d(out_channels),
+            nn.GroupNorm(8, out_channels),
             nn.ReLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, 3, padding=1),
-            nn.BatchNorm2d(out_channels),
+            nn.GroupNorm(8, out_channels),
             nn.ReLU(inplace=True)
         )
 
@@ -58,7 +58,12 @@ class SAM2UNet(nn.Module):
         # Main feature projector
         self.projector = ResidualProjector(in_channels=768, out_channels=128)
         # Skip channel reducers
-        self.skip_proj4 = nn.Conv2d(768, 128, 1)
+        # self.skip_proj4 = nn.Conv2d(768, 128, 1)
+        self.skip_proj4 = nn.Sequential(
+            nn.Conv2d(768, 128, 1),
+            nn.GroupNorm(8, 128),
+            nn.ReLU(inplace=True)
+        )
         self.skip_proj3 = nn.Conv2d(768, 64, 1)
         self.skip_proj2 = nn.Conv2d(768, 32, 1)
         self.skip_proj1 = nn.Conv2d(768, 16, 1)
@@ -67,7 +72,12 @@ class SAM2UNet(nn.Module):
         self.up3 = UpBlock(64, 64, 32)
         self.up2 = UpBlock(32, 32, 16)
         self.up1 = UpBlock(16, 16, 8)
-        self.out_conv = nn.Conv2d(8, out_channels, kernel_size=1)
+        # self.out_conv = nn.Conv2d(8, out_channels, kernel_size=1)
+        self.out_conv = nn.Sequential(
+            nn.GroupNorm(4, 8),
+            nn.ReLU(inplace=True),
+            nn.Conv2d(8, 1, kernel_size=1)
+        )
 
     def forward(self, x):
         input_shape = x.shape  # [B, C, H, W] (여기서 C=1)
