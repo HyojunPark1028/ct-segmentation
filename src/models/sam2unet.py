@@ -44,16 +44,20 @@ class UpBlock(nn.Module):
 class SAM2UNet(nn.Module):
     def __init__(self, checkpoint: str, in_channels: int = 1, out_channels: int = 1):
         super().__init__()
-
         self.sam = sam_model_registry["vit_b"](checkpoint=checkpoint)
-
         for p in self.sam.image_encoder.parameters():
             p.requires_grad = False
         for name, p in self.sam.image_encoder.named_parameters():
             if any(f"blocks.{i}" in name for i in range(4, 12)) or "norm" in name:
                 p.requires_grad = True
 
+        # Main feature projector
         self.projector = ResidualProjector(in_channels=768, out_channels=128)
+        # Skip channel reducers
+        self.skip_proj4 = nn.Conv2d(768, 128, 1)
+        self.skip_proj3 = nn.Conv2d(768, 64, 1)
+        self.skip_proj2 = nn.Conv2d(768, 32, 1)
+        self.skip_proj1 = nn.Conv2d(768, 16, 1)
 
         self.up4 = UpBlock(128, 128, 64)
         self.up3 = UpBlock(64, 64, 32)
@@ -64,64 +68,41 @@ class SAM2UNet(nn.Module):
     def forward(self, x):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
-
-        # Step 1: Patchify image
         x = self.sam.image_encoder.patch_embed(x)  # [B, H, W, C]
-        print(f"[DEBUG] patch_embed output: {x.shape}")
         B, H, W, C = x.shape
-
-        raw_embed = self.sam.image_encoder.pos_embed  # [1, H', W', C]
-        print(f"[DEBUG] pos_embed original shape: {raw_embed.shape}")
-
-        # 만약 pos_embed의 H', W'가 H, W와 다르면 resize (interpolate)
+        raw_embed = self.sam.image_encoder.pos_embed
         if (raw_embed.shape[1], raw_embed.shape[2]) != (H, W):
-            # [1, H', W', C] -> [1, C, H', W'] -> interpolate -> [1, C, H, W] -> [1, H, W, C]
             raw_embed = raw_embed.permute(0, 3, 1, 2)
             raw_embed = F.interpolate(raw_embed, size=(H, W), mode="bilinear", align_corners=False)
             raw_embed = raw_embed.permute(0, 2, 3, 1)
-
-        # pos_embed를 batch에 맞게 expand
-        pos_embed = raw_embed.expand(B, -1, -1, -1)  # [B, H, W, C]
-
-        # 더하기
+        pos_embed = raw_embed.expand(B, -1, -1, -1)
         x = x + pos_embed
 
-        # (transformer로 넘길 때 [B, H, W, C] 그대로!)
-        # 이후 로직은 transformer가 내부에서 알아서 처리
-
-
-        # Step 3: Pass through transformer blocks
         skips = []
         for i, blk in enumerate(self.sam.image_encoder.blocks):
             x = blk(x)  # [B, H, W, C]
-            if i in [2, 4, 6, 8]:
+            if i == 2:
+                skips.append(x)
+            elif i == 4:
+                skips.append(x)
+            elif i == 6:
+                skips.append(x)
+            elif i == 8:
                 skips.append(x)
 
-        # Step 4: Flatten, then LayerNorm
-        x_flat = x.reshape(B, H * W, C)  # [B, HW, C]
+        # Project main feature to 128
+        x = x.permute(0, 3, 1, 2)  # [B, C, H, W]
+        x = self.projector(x)       # [B, 128, H, W]
+        # Project skip features
+        s4 = self.skip_proj4(skips[3].permute(0, 3, 1, 2))  # [B, 128, H, W]
+        s3 = self.skip_proj3(skips[2].permute(0, 3, 1, 2))  # [B, 64, H, W]
+        s2 = self.skip_proj2(skips[1].permute(0, 3, 1, 2))  # [B, 32, H, W]
+        s1 = self.skip_proj1(skips[0].permute(0, 3, 1, 2))  # [B, 16, H, W]
 
-        # Step 5: Reshape to 2D feature map
-        x = x.transpose(1, 2).contiguous().view(B, C, H, W)  # [B, C, H, W]
-        skips = [s.reshape(B, H * W, C).transpose(1, 2).contiguous().view(B, C, H, W) for s in skips]
-
-        # Step 6: Projector
-        x = self.projector(x)
-        skips = [self.projector(s) for s in skips]
-
-        # Step 7: Decoder
-        d4 = self.up4(x, skips[-1])
-        d3 = self.up3(d4, skips[-2])
-        d2 = self.up2(d3, skips[-3])
-        d1 = self.up1(d2, skips[-4])
-
-        print(f"[DEBUG] decoder output d1 shape: {d1.shape}")  # 👈 이 줄!
-
+        d4 = self.up4(x, s4)
+        d3 = self.up3(d4, s3)
+        d2 = self.up2(d3, s2)
+        d1 = self.up1(d2, s1)
         out = self.out_conv(d1)
-
-        print(f"[DEBUG] after out_conv shape: {out.shape}")     # 👈 이 줄도 추가
-
-        # Step 8: Final resize
-        print(f"[DEBUG] decoder out before interpolate: {out.shape}")
         out = F.interpolate(out, scale_factor=2, mode='bilinear', align_corners=False)
         return out
-
