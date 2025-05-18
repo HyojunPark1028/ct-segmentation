@@ -28,7 +28,6 @@ class UpBlock(nn.Module):
         x = torch.cat([x, skip], dim=1)
         return self.conv(x)
 
-
 class UTransVision(nn.Module):
     def __init__(self, img_size=224, num_classes=1, use_pretrained=True):
         super().__init__()
@@ -47,10 +46,13 @@ class UTransVision(nn.Module):
         # Vision Transformer
         self.transformer = vit_base_patch16_224(pretrained=use_pretrained)
         self.proj = nn.Conv2d(512, 768, kernel_size=1)
+        self.norm = nn.LayerNorm(768)
 
-        self.pos_embed = None  # 동적 위치 임베딩 초기화
+        # Fixed Positional Embedding
+        self.pos_embed = nn.Parameter(torch.zeros(1, 196, 768))
+        nn.init.trunc_normal_(self.pos_embed, std=0.02)
 
-        self.decoder4 = UpBlock(768, 512, 256)
+        self.decoder4 = UpBlock(768 + 512, 512, 256)
         self.decoder3 = UpBlock(256, 256, 128)
         self.decoder2 = UpBlock(128, 128, 64)
         self.decoder1 = UpBlock(64, 64, 32)
@@ -64,21 +66,18 @@ class UTransVision(nn.Module):
         x4 = self.encoder4(self.pool3(x3))
         x_bottom = self.pool4(x4)  # [B, 512, H, W]
 
-        # Transformer 입력 처리
         B, C, H, W = x_bottom.shape
         x_t = self.proj(x_bottom).flatten(2).transpose(1, 2)  # [B, N, C]
-
-        # 동적 위치 임베딩 적용
-        if self.pos_embed is None or self.pos_embed.shape[1] != x_t.size(1):
-            self.pos_embed = nn.Parameter(torch.zeros(1, x_t.size(1), x_t.size(2), device=x_t.device))
-        x_t = x_t + self.pos_embed  # [B, N, C]
+        x_t = self.norm(x_t)
+        x_t = x_t + self.pos_embed[:, :x_t.size(1), :]  # Fixed positional embedding
 
         x_t = self.transformer.blocks(x_t)
         x_t = self.transformer.norm(x_t)
         x_t = x_t.transpose(1, 2).reshape(B, 768, H, W)  # [B, 768, H, W]
 
-        # Decoder
-        d4 = self.decoder4(x_t, x4)
+        x_fused = torch.cat([x_t, x4], dim=1)  # Feature fusion
+
+        d4 = self.decoder4(x_fused, x4)
         d3 = self.decoder3(d4, x3)
         d2 = self.decoder2(d3, x2)
         d1 = self.decoder1(d2, x1)
