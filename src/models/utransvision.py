@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from timm.models.vision_transformer import vit_base_patch16_224
 
 class ConvBlock(nn.Module):
@@ -59,6 +60,13 @@ class UTransVision(nn.Module):
 
         self.final_conv = nn.Conv2d(32, num_classes, kernel_size=1)
 
+    def interpolate_pos_encoding(self, x, H, W):
+        N = self.pos_embed.shape[1]
+        pos_embed = self.pos_embed.reshape(1, int(N**0.5), int(N**0.5), -1).permute(0, 3, 1, 2)  # [1, C, H, W]
+        pos_embed = F.interpolate(pos_embed, size=(H, W), mode='bicubic', align_corners=False)
+        pos_embed = pos_embed.permute(0, 2, 3, 1).reshape(1, H * W, -1)
+        return pos_embed
+
     def forward(self, x):
         x1 = self.encoder1(x)
         x2 = self.encoder2(self.pool1(x1))
@@ -69,7 +77,9 @@ class UTransVision(nn.Module):
         B, C, H, W = x_bottom.shape
         x_t = self.proj(x_bottom).flatten(2).transpose(1, 2)  # [B, N, C]
         x_t = self.norm(x_t)
-        x_t = x_t + self.pos_embed[:, :x_t.size(1), :]  # Fixed positional embedding
+
+        pos_embed = self.interpolate_pos_encoding(x_t, H, W)
+        x_t = x_t + pos_embed  # Interpolated positional embedding
 
         x_t = self.transformer.blocks(x_t)
         x_t = self.transformer.norm(x_t)
