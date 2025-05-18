@@ -79,9 +79,11 @@ class SAM2UNet(nn.Module):
         print(f"[DEBUG] pos_embed original shape: {raw_embed.shape}")
 
         if raw_embed.dim() == 4:
-            raw_embed = raw_embed.flatten(2).transpose(1, 2)  # [1, L, C]
-        elif raw_embed.shape[-1] != 768:  # [1, 768, 64]이면 [1, 64, 768]로 변환
-            raw_embed = raw_embed.permute(0, 2, 1)
+            # [1, H, W, C] → [1, HW, C]
+            H, W, C = raw_embed.shape[1], raw_embed.shape[2], raw_embed.shape[3]
+            raw_embed = raw_embed.view(1, H*W, C)  # [1, HW, C]
+        elif raw_embed.shape[-1] != 768:  # [1, 768, 64] 같은 경우
+            raw_embed = raw_embed.permute(0, 2, 1)  # [1, 64, 768]
 
         print(f"[DEBUG] pos_embed after shape: {raw_embed.shape}")
 
@@ -97,6 +99,7 @@ class SAM2UNet(nn.Module):
         print(f"[DEBUG] x shape: {x.shape}, interpolated_embed shape: {interpolated_embed.shape}")
         x = x + interpolated_embed
         x = self.sam.image_encoder.pos_drop(x)
+
 
 
 
