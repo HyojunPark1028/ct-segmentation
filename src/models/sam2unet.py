@@ -74,15 +74,14 @@ class SAM2UNet(nn.Module):
         x = x.flatten(2).transpose(1, 2)  # [B, HW, C]
         num_patches = x.shape[1]
 
-        # ✅ interpolate pos_embed if shape mismatch
         pos_embed = self.sam.image_encoder.pos_embed  # [1, L, C]
         if pos_embed.shape[1] != num_patches:
             pos_embed = F.interpolate(
                 pos_embed.transpose(1, 2),         # [1, C, L]
-                size=num_patches,                  # → interpolate to num_patches
-                mode="linear",
-                align_corners=False
+                size=num_patches,
+                mode="nearest",                    # ✅ 수정된 안전 모드
             ).transpose(1, 2)                      # [1, num_patches, C]
+
 
         x = x + pos_embed
         x = self.sam.image_encoder.pos_drop(x)
