@@ -50,7 +50,7 @@ def train(cfg_path):
     # Dataset (pre‑split)
     # ✅ 모델에 따라 img_size 결정
     model_name = cfg.model.name.lower()
-    img_size = cfg.model.img_size if model_name in ["transunet", "swinunet", "medsam"] else None
+    img_size = cfg.model.img_size if model_name in ["transunet", "swinunet", "medsam", "sam2unet"] else None
     use_pretrained = cfg.model.get("use_pretrained", False)
     normalize_type = "sam" if cfg.model.name.lower() in ["medsam", "sam2unet"] else "default"
 
