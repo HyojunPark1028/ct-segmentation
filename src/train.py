@@ -102,7 +102,7 @@ def train(cfg_path):
             preds = model(x)
             if isinstance(preds, tuple):
                 pred_main, *pred_deep = preds
-                loss = 0.7 * criterion(pred_main, y)
+                loss = 0.85 * criterion(pred_main, y)
                 for i, p in enumerate(pred_deep):
                     try:
                         # print(f"[DEBUG] pred_deep[{i}] shape: {p.shape}")
@@ -115,7 +115,7 @@ def train(cfg_path):
                         p_up = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
 
                         # print(f"[DEBUG] p_up shape: {p_up.shape}")
-                        loss += 0.1 * criterion(p_up, y)
+                        loss += 0.05 * criterion(p_up, y)
                     except Exception as e:
                         print(f"[ERROR] in deep supervision loss for p[{i}]: {e}")
                         raise

@@ -40,7 +40,11 @@ def compute_mask_coverage(model, loader, device, thr=0.5):
         for x, y in loader:
             x, y = x.to(device), y.to(device)
             y = (y > 0.5).float()  # ⭐ 강제 이진화
-            pred = torch.sigmoid(model(x)) > thr
+            output = model(x)
+            if isinstance(output, tuple):
+                output = output[0]  # SAM2UNet 등 대응
+
+            pred = torch.sigmoid(output) > thr            
             inter = (pred * y).sum()
             gt_total += y.sum()
             pred_total += pred.sum()
