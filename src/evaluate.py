@@ -18,7 +18,11 @@ def evaluate(model, loader, device, thr=0.5, vis=False):
     model.eval(); d=i=0; n=len(loader)
     with torch.no_grad():
         for k,(x,y) in enumerate(loader):
-            x,y=x.to(device),y.to(device); p = torch.sigmoid(model(x))
+            x,y=x.to(device),y.to(device); 
+            output = model(x)
+            if isinstance(output, tuple):
+                output = output[0]
+            p = torch.sigmoid(output)
             di,io=_metric(p,y,thr); d+=di; i+=io
             if vis and k==0: 
                 vis_n = min(10, x.shape[0])  # 안전하게 제한
