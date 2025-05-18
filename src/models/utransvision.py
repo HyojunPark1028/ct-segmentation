@@ -26,6 +26,8 @@ class UpBlock(nn.Module):
 
     def forward(self, x, skip):
         x = self.up(x)
+        if skip.shape[2:] != x.shape[2:]:
+            skip = F.interpolate(skip, size=x.shape[2:], mode='bilinear', align_corners=False)
         x = torch.cat([x, skip], dim=1)
         return self.conv(x)
 
