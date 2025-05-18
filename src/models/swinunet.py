@@ -8,11 +8,12 @@ class ConvBlock(nn.Module):
         super().__init__()
         self.block = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
+            nn.GroupNorm(8, out_channels),
+            nn.GELU(),
+            nn.Dropout(p=0.1),
             nn.Conv2d(out_channels, out_channels, 3, padding=1),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
+            nn.GroupNorm(8, out_channels),
+            nn.GELU(),
         )
 
     def forward(self, x):
@@ -39,7 +40,7 @@ class SwinUNet(nn.Module):
         self.backbone = swin_base_patch4_window7_224(pretrained=use_pretrained)
         self.backbone.head = nn.Identity()
 
-        self.proj4 = nn.Conv2d(1024, 384, kernel_size=1)  # 수정 전: (768, 384)
+        self.proj4 = nn.Conv2d(1024, 384, kernel_size=1)
         self.proj3 = nn.Conv2d(512, 192, kernel_size=1)
         self.proj2 = nn.Conv2d(256, 96, kernel_size=1)
         self.proj1 = nn.Conv2d(128, 48, kernel_size=1)
@@ -58,10 +59,10 @@ class SwinUNet(nn.Module):
         B = x.size(0)
 
         x = self.backbone.patch_embed(x)
-        skip1 = self.backbone.layers[0](x)  # [B, H1, W1, 96]
-        skip2 = self.backbone.layers[1](skip1)  # [B, H2, W2, 192]
-        skip3 = self.backbone.layers[2](skip2)  # [B, H3, W3, 384]
-        x = self.backbone.layers[3](skip3)      # [B, H4, W4, 768]
+        skip1 = self.backbone.layers[0](x)  # [B, H1, W1, 128]
+        skip2 = self.backbone.layers[1](skip1)  # [B, H2, W2, 256]
+        skip3 = self.backbone.layers[2](skip2)  # [B, H3, W3, 512]
+        x = self.backbone.layers[3](skip3)      # [B, H4, W4, 1024]
 
         x = self.backbone.norm(x)
         B, H, W, C = x.shape
