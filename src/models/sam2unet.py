@@ -53,14 +53,13 @@ class SAM2UNet(nn.Module):
             if any(f"blocks.{i}" in name for i in range(4, 12)) or "norm" in name:
                 p.requires_grad = True
 
-        self.projector = ResidualProjector(in_channels=768, out_channels=256)
+        self.projector = ResidualProjector(in_channels=768, out_channels=128)
 
-        self.up4 = UpBlock(256, 256, 128)
-        self.up3 = UpBlock(128, 128, 64)
-        self.up2 = UpBlock(64, 64, 32)
-        self.up1 = UpBlock(32, 32, 16)
-
-        self.out_conv = nn.Conv2d(16, out_channels, kernel_size=1)
+        self.up4 = UpBlock(128, 128, 64)
+        self.up3 = UpBlock(64, 64, 32)
+        self.up2 = UpBlock(32, 32, 16)
+        self.up1 = UpBlock(16, 16, 8)
+        self.out_conv = nn.Conv2d(8, out_channels, kernel_size=1)
 
     def forward(self, x):
         if x.shape[1] == 1:
