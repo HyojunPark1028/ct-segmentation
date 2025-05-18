@@ -71,16 +71,24 @@ class SAM2UNet(nn.Module):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
 
-        # 🔵 Encoder: extract multi-scale features manually
+        # ✅ Only use ViT encoder blocks directly — avoid sam.image_encoder(x)
         feats = x
         skips = []
         for i, blk in enumerate(self.sam.image_encoder.blocks):
             feats = blk(feats)
-            if i in [2, 4, 6, 8]:  # select 4 skip levels
+            if i in [2, 4, 6, 8]:  # 4개의 skip connection 수집
                 skips.append(feats)
 
-        # ⛔️ Remove norm + neck —> ✅ Use raw 2D feature output
+        # ✅ Don't use neck or norm (ViT 구조)
         feats = self.projector(feats)
 
         # 🟢 Decoder with skip connections
         d4 = self.up4(feats, skips[-1])
+        d3 = self.up3(d4, skips[-2])
+        d2 = self.up2(d3, skips[-3])
+        d1 = self.up1(d2, skips[-4])
+        out = self.out_conv(d1)
+
+        # 🔴 Final resize to input image size
+        out = F.interpolate(out, size=x.shape[2:], mode='bilinear', align_corners=False)
+        return out
