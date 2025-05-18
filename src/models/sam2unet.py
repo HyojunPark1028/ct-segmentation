@@ -99,7 +99,6 @@ class SAM2UNet(nn.Module):
 
         # Step 4: Flatten, then LayerNorm
         x_flat = x.reshape(B, H * W, C)  # [B, HW, C]
-        x = self.sam.image_encoder.norm(x_flat)  # [B, HW, C]
 
         # Step 5: Reshape to 2D feature map
         x = x.transpose(1, 2).contiguous().view(B, C, H, W)  # [B, C, H, W]
