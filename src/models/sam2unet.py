@@ -67,6 +67,7 @@ class SAM2UNet(nn.Module):
 
         # Step 1: Patchify image
         x = self.sam.image_encoder.patch_embed(x)  # [B, C=768, H/16, W/16]
+        print(f"[DEBUG] patch_embed output: {x.shape}")
         B, C, H, W = x.shape
 
         # Step 2: Flatten and add positional encoding
