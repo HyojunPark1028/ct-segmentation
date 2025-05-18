@@ -1,82 +1,87 @@
+# medsam2 model implementation
+# Place this file under src/models/medsam2.py
+
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from segment_anything.build_sam import sam_model_registry
-from .unet import ClassicUNet
-
-class ProjectorBlock(nn.Module):
-    def __init__(self, in_channels=256, out_channels=256):
-        super().__init__()
-        self.block = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.GroupNorm(8, out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.GroupNorm(8, out_channels),
-            nn.ReLU(inplace=True)
-        )
-
-    def forward(self, x):
-        return self.block(x)
+import numpy as np
+from segment_anything import sam_model_registry, SamPredictor
 
 class MedSAM2(nn.Module):
-    def __init__(self, checkpoint: str, in_channels: int = 1, out_channels: int = 1, img_size: int = 512):
+    """
+    MedSAM2: A prompt-driven segmentation model for medical images
+    based on Segment Anything Model 2 (SAM2) with volume/frame memory.
+
+    Usage in your training pipeline:
+        model = MedSAM2(
+            checkpoint=cfg.model.checkpoint,
+            model_type="vit_b",
+            image_size=512,
+            device=device,
+        )
+    """
+    def __init__(self, checkpoint, image_size=512, device=None):
         super().__init__()
+        # Determine device
+        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.image_size = image_size
 
-        # 1. SAM ViT-B encoder 로드
+        # Load the SAM2 backbone
         self.sam = sam_model_registry["vit_b"](checkpoint=checkpoint)
+        self.sam.to(self.device)
 
-        # 2. encoder 일부 fine-tuning 허용 (blocks.6~11 + norm)
-        for p in self.sam.image_encoder.parameters():
-            p.requires_grad = False
-        for name, p in self.sam.image_encoder.named_parameters():
-            if any(k in name for k in ["blocks.4", "blocks.5", "blocks.6", "blocks.7", "blocks.8", "blocks.9", "blocks.10", "blocks.11", "norm"]):
-                p.requires_grad = True
+        # Predictor for prompt-based segmentation
+        self.predictor = SamPredictor(self.sam)
 
-        # 3. projector
-        self.projector = ProjectorBlock(in_channels=256, out_channels=256)
+        # Precomputed prompt: full-image bounding box
+        # Format: [x_min, y_min, x_max, y_max]
+        self.full_box = np.array([0, 0, image_size - 1, image_size - 1])[None, :]
 
-        # 4. decoder
-        self.decoder = ClassicUNet(in_channels=256, out_channels=out_channels)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward pass for a batch of 2D slices or RGB images.
 
-        # 5. Decoder 마지막 출력층의 bias 초기값 설정 및 학습 가능하도록 수정
-        self.final_conv_ref = None
-        for m in self.decoder.modules():
-            if isinstance(m, nn.Conv2d) and m.out_channels == out_channels:
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0.0)
-                    m.bias.requires_grad = True
-                    self.final_conv_ref = m
+        Args:
+            x: Tensor of shape (B, C, H, W). C can be 1 (grayscale) or 3 (RGB).
+        Returns:
+            logits: Tensor of shape (B, 1, H, W) with raw mask logits.
+        """
+        B, C, H, W = x.shape
+        x = x.to(self.device)
 
-
-    def forward(self, x):
-        if x.shape[1] == 1:
+        # If single-channel, replicate to 3 channels
+        if C == 1:
             x = x.repeat(1, 3, 1, 1)
 
-        # 🔵 A. Encoder 출력 확인
-        feats = self.sam.image_encoder(x)
-        # print(f"\n[ENCODER OUTPUT]")
-        # print(f"Shape: {feats.shape}")
-        # print(f"Mean: {feats.mean().item():.6f}, Std: {feats.std().item():.6f}, Min: {feats.min().item():.6f}, Max: {feats.max().item():.6f}")
+        # Resize input to the size expected by SAM2
+        x_resized = torch.nn.functional.interpolate(
+            x, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
+        )
 
-        # 🟢 B. Projector 출력 확인
-        proj = self.projector(feats)
-        # print(f"[PROJECTOR OUTPUT]")
-        # print(f"Shape: {proj.shape}")
-        # print(f"Mean: {proj.mean().item():.6f}, Std: {proj.std().item():.6f}, Min: {proj.min().item():.6f}, Max: {proj.max().item():.6f}")
+        logits_list = []
+        # Process each sample individually due to predictor API
+        for i in range(B):
+            # Convert to HxWx3 numpy array for the predictor
+            img_np = x_resized[i].permute(1, 2, 0).cpu().numpy()
+            self.predictor.set_image(img_np)
 
-        # 🟣 C. Decoder 출력 확인
-        out = self.decoder(proj)
-        out = F.interpolate(out, size=x.shape[2:], mode='bilinear', align_corners=False)
-        # print(f"[DECODER OUTPUT]")
-        # print(f"Shape: {out.shape}")
-        # print(f"Mean: {out.mean().item():.6f}, Std: {out.std().item():.6f}, Min: {out.min().item():.6f}, Max: {out.max().item():.6f}")
+            # Predict mask for the entire image using the full-box prompt
+            masks, scores, logits = self.predictor.predict(
+                point_coords=None,
+                point_labels=None,
+                box=self.full_box,
+                multimask_output=False,
+            )
+            # logits is an array of shape (1, H, W)
+            logit = torch.from_numpy(logits[0]).to(self.device)  # (H, W)
+            logits_list.append(logit)
 
-        # if self.final_conv_ref is not None:
-        #     print(f"[DECODER BIAS MEAN]: {self.final_conv_ref.bias.data.mean().item():.6f}")
+        # Stack logits into a batch: (B, H, W)
+        batch_logits = torch.stack(logits_list, dim=0)
+        # Add channel dimension: (B, 1, H, W)
+        batch_logits = batch_logits.unsqueeze(1)
 
-        # pred = torch.sigmoid(out)
-        # print(f"[SIGMOID MEAN]: {pred.mean().item():.6f}")
-
-        return out  # sigmoid는 loss나 eval 쪽에서 처리
-    
+        # Resize back to the original resolution
+        batch_logits = torch.nn.functional.interpolate(
+            batch_logits, size=(H, W), mode='bilinear', align_corners=False
+        )
+        return batch_logits
