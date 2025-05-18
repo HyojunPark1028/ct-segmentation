@@ -71,24 +71,28 @@ class SAM2UNet(nn.Module):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
 
-        # ✅ Only use ViT encoder blocks directly — avoid sam.image_encoder(x)
+        # ✅ Step 1: patch embedding
+        x = self.sam.image_encoder.patch_embed(x)  # [B, 256, H/16, W/16]
+        x = self.sam.image_encoder.pos_drop(x)     # optional positional dropout
+
+        # ✅ Step 2: pass through ViT blocks
         feats = x
         skips = []
         for i, blk in enumerate(self.sam.image_encoder.blocks):
             feats = blk(feats)
-            if i in [2, 4, 6, 8]:  # 4개의 skip connection 수집
+            if i in [2, 4, 6, 8]:  # extract skip features
                 skips.append(feats)
 
-        # ✅ Don't use neck or norm (ViT 구조)
+        # ✅ Step 3: projector
         feats = self.projector(feats)
 
-        # 🟢 Decoder with skip connections
+        # ✅ Step 4: decoder with skip connections
         d4 = self.up4(feats, skips[-1])
         d3 = self.up3(d4, skips[-2])
         d2 = self.up2(d3, skips[-3])
         d1 = self.up1(d2, skips[-4])
         out = self.out_conv(d1)
 
-        # 🔴 Final resize to input image size
+        # ✅ Step 5: resize to match input
         out = F.interpolate(out, size=x.shape[2:], mode='bilinear', align_corners=False)
         return out
