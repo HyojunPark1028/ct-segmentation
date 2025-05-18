@@ -4,7 +4,7 @@ class DiceLoss(nn.Module):
     def __init__(self, smooth=1.):
         super().__init__(); self.smooth=smooth
     def forward(self, p, t):
-        p=torch.sigmoid(p).view(-1); t=t.view(-1)
+        p=torch.sigmoid(p).reshape(-1); t=t.reshape(-1)
         inter=(p*t).sum(); return 1- (2*inter+self.smooth)/(p.sum()+t.sum()+self.smooth)
 
 class FocalLoss(nn.Module):
