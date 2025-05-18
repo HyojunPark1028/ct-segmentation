@@ -34,7 +34,6 @@ class SAM2UNet(nn.Module):
             img_size (int): SAM encoder 입력 크기 (기본 640)
         """
         super().__init__()
-        self.img_size = img_size
 
         # 1. SAM encoder 로드 (ViT-H)
         self.sam = sam_model_registry["vit_b"](checkpoint=checkpoint)
