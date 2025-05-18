@@ -106,7 +106,13 @@ def train(cfg_path):
                     try:
                         print(f"[DEBUG] pred_deep[{i}] shape: {p.shape}")
                         h, w = y.shape[2], y.shape[3]
-                        p_up = F.interpolate(p, size=(int(h), int(w)), mode="bilinear", align_corners=False)
+
+                        # 1️⃣ 채널 수 1로 줄이기
+                        p = nn.Conv2d(p.shape[1], 1, kernel_size=1).to(p.device)(p)
+
+                        # 2️⃣ 업샘플링
+                        p_up = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
+
                         print(f"[DEBUG] p_up shape: {p_up.shape}")
                         loss += 0.1 * criterion(p_up, y)
                     except Exception as e:
