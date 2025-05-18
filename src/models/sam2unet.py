@@ -82,7 +82,10 @@ class SAM2UNet(nn.Module):
         d2 = self.up_blocks[2](d3, self.project_skips[2](feats[0]))
 
         out = self.out_conv(d2)
-        out = F.interpolate(out, size=x.shape[2:] * 4, mode='bilinear', align_corners=False)
+
+        # ⛳ 수정된 부분: 잘못된 size 리스트 반복 대신 명시적 튜플
+        h, w = x.shape[2:]
+        out = F.interpolate(out, size=(h * 4, w * 4), mode='bilinear', align_corners=False)
 
         # Deep supervision: d2, d3, d4도 반환
         return out, d4, d3, d2
