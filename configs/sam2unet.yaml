@@ -1,8 +1,10 @@
 model:
   name: sam2unet
-  use_pretrained: true
-  checkpoint: weights/sam_vit_h_4b8939.pth  # 사전학습된 SAM ViT-H 모델
-  img_size: null
+  img_size: 1024
+  patch_size: 32  # 기존 16에서 32로 증가
+  checkpoint: weights/sam_vit_b_01ec64.pth  # 메모리 절감을 위한 ViT-B 사용
+  grad_checkpointing: true
+  freeze_layers: 0  # 완전 fine-tune (일부 freeze 원할 경우 숫자 조정)
 
 experiment:
   name: sam2unet_hu_dice_focal_epoch50_pretrained
