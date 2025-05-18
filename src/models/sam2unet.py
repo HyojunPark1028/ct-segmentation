@@ -71,10 +71,25 @@ class SAM2UNet(nn.Module):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
 
-        # ✅ Step 1: patch embedding only (no pos_drop)
-        x = self.sam.image_encoder.patch_embed(x)  # [B, 256, H/16, W/16]
+        # ✅ Step 1: patch embedding
+        x = self.sam.image_encoder.patch_embed(x)
 
-        # ✅ Step 2: transformer block traversal
+        # 🐛 디버깅: patch_embed 출력 shape 확인
+        print(f"[DEBUG] patch_embed output shape: {x.shape}")
+
+        # ✅ Step 1.5: reshape to [B, C, H, W] if necessary
+        if x.ndim == 3:
+            # Case: [B, H*W, C] → [B, C, H, W]
+            B, N, C = x.shape
+            H = W = int(N ** 0.5)
+            x = x.view(B, H, W, C).permute(0, 3, 1, 2).contiguous()
+            print(f"[DEBUG] reshaped from [B, N, C] to: {x.shape}")
+        elif x.ndim == 4 and x.shape[-1] in (768, 256):
+            # Case: [B, H, W, C] → [B, C, H, W]
+            x = x.permute(0, 3, 1, 2).contiguous()
+            print(f"[DEBUG] permuted from [B, H, W, C] to: {x.shape}")
+
+        # ✅ Step 2: transformer blocks
         feats = x
         skips = []
         for i, blk in enumerate(self.sam.image_encoder.blocks):
@@ -92,6 +107,6 @@ class SAM2UNet(nn.Module):
         d1 = self.up1(d2, skips[-4])
         out = self.out_conv(d1)
 
-        # ✅ Step 5: final output resize
+        # ✅ Step 5: resize to match input
         out = F.interpolate(out, size=x.shape[2:], mode='bilinear', align_corners=False)
         return out
