@@ -17,7 +17,7 @@ from .dataset import NpySegDataset
 from .losses import get_loss
 from .evaluate import evaluate, compute_mask_coverage
 
-print("hello1")
+print("hello2")
 
 def seed_everything(seed=42):
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
@@ -77,7 +77,7 @@ def train(cfg_path):
     elif cfg.model.name.lower() == "medsam":
         model = MedSAM(checkpoint=cfg.model.checkpoint).to(device)
     elif cfg.model.name.lower() == "medsam2":
-        model = MedSAM2(checkpoint=cfg.model.checkpoint).to(device)   
+        model = MedSAM2(checkpoint=cfg.model.checkpoint, image_size=cfg.model.img_size).to(device)   
     else:
         raise ValueError(f"Unsupported model name: {cfg.model.name}")
 
