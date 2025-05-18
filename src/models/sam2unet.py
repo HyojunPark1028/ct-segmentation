@@ -109,7 +109,12 @@ class SAM2UNet(nn.Module):
         d3 = self.up3(d4, skips[-2])
         d2 = self.up2(d3, skips[-3])
         d1 = self.up1(d2, skips[-4])
+
+        print(f"[DEBUG] decoder output d1 shape: {d1.shape}")  # 👈 이 줄!
+
         out = self.out_conv(d1)
+
+        print(f"[DEBUG] after out_conv shape: {out.shape}")     # 👈 이 줄도 추가
 
         # Step 8: Final resize
         print(f"[DEBUG] decoder out before interpolate: {out.shape}")
