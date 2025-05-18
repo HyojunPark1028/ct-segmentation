@@ -27,9 +27,15 @@ class MedSAM2(nn.Module):
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.image_size = image_size
 
-        # SAM2 전체 모델 체크포인트 로드
-        self.sam = sam_model_registry[model_type](checkpoint=checkpoint)
+        # SAM2 backbone 초기화 (checkpoint=None 으로 가중치 로드 건너뜀)
+        self.sam = sam_model_registry[model_type](checkpoint=None)
         self.sam.to(self.device)
+
+        # MedSAM2 전체 checkpoint 로드 (state 안에 'model' key인 경우 지원)
+        ckpt = torch.load(checkpoint, map_location=self.device)
+        state = ckpt.get('model', ckpt)
+        # backbone + head 모두 strict=False 로 불러오기
+        self.sam.load_state_dict(state, strict=False)
 
         # Prompt 기반 세그멘테이션 예측기
         self.predictor = SamPredictor(self.sam)
@@ -38,24 +44,15 @@ class MedSAM2(nn.Module):
         self.full_box = np.array([0, 0, image_size - 1, image_size - 1])[None, :]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            x: Tensor of shape (B, C, H, W) -- C=1 or 3
-        Returns:
-            logits: Tensor of shape (B, 1, H, W)
-        """
         B, C, H, W = x.shape
         x = x.to(self.device)
-
-        # 흑백 이미지는 3채널로 복제
+        # single-channel replicate to 3-channel
         if C == 1:
             x = x.repeat(1, 3, 1, 1)
-
-        # SAM 입력 크기로 리사이즈
+        # resize to SAM input size
         x_resized = torch.nn.functional.interpolate(
             x, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
         )
-
         logits_list = []
         for i in range(B):
             img_np = x_resized[i].permute(1, 2, 0).cpu().numpy()
@@ -66,11 +63,9 @@ class MedSAM2(nn.Module):
                 box=self.full_box,
                 multimask_output=False,
             )
-            logit = torch.from_numpy(logits[0]).to(self.device)
-            logits_list.append(logit)
-
-        # 배치 텐서로 스택 후 원해상도로 되돌리기
-        batch_logits = torch.stack(logits_list, dim=0).unsqueeze(1)
+            logits_list.append(torch.from_numpy(logits[0]).to(self.device))
+        batch_logits = torch.stack(logits_list, dim=0).unsqueeze(1)  # (B, 1, H', W')
+        # resize back to original
         batch_logits = torch.nn.functional.interpolate(
             batch_logits, size=(H, W), mode='bilinear', align_corners=False
         )
