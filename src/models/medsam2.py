@@ -36,17 +36,24 @@ class MedSAM2(nn.Module):
         # Load state_dict with strict=False to allow missing keys
         self.sam.load_state_dict(state, strict=False)
 
-        # Adapt positional embeddings to match resized input
-        # pos_embed shape: [1, embed_dim, H_pe, W_pe]
-        pe = self.sam.image_encoder.pos_embed  # nn.Parameter
-        # Determine patch size used by SAM (kernel_size from patch_embed conv)
-        ks = self.sam.image_encoder.patch_embed.kernel_size
-        ps = ks[0] if isinstance(ks, tuple) else ks
-        H_new = self.image_size // ps
-        W_new = self.image_size // ps
-        # Interpolate pos_embed
+                # Adapt positional embeddings to new input size
+        pe = self.sam.image_encoder.pos_embed  # shape [1, C, H_pe, W_pe]
+        # Determine patch size from PatchEmbed
+        ps = getattr(self.sam.image_encoder.patch_embed, 'patch_size', None)
+        if ps is None:
+            # fallback: use kernel_size of conv proj
+            ks = self.sam.image_encoder.patch_embed.proj.kernel_size
+            ps = ks[0] if isinstance(ks, tuple) else ks
+        # compute new grid dimensions
+        if isinstance(ps, tuple):
+            ph, pw = ps
+        else:
+            ph = pw = ps
+        H_new = self.image_size // ph
+        W_new = self.image_size // pw
+        # Interpolate positional embeddings
         pe_new = F.interpolate(pe, size=(H_new, W_new), mode='bilinear', align_corners=False)
-        # Replace pos_embed parameter
+        # Replace the pos_embed parameter
         self.sam.image_encoder.pos_embed = nn.Parameter(pe_new)
 
         # Prepare full-image box prompt for prompt_encoder
