@@ -140,7 +140,7 @@ def train(cfg_path):
 
     pd.DataFrame(history).to_csv(os.path.join(cfg.train.save_dir, 'metrics.csv'), index=False)
 
-    model.load_state_dict(torch.load(os.path.join(cfg.train.save_dir, "model_best.pth")))
+    model.load_state_dict(torch.load(os.path.join(cfg.train.save_dir, "model_best.pth"), weights_only=False))
     model.eval(); test_loss = 0
     test_start = time.time()
     with torch.no_grad():
