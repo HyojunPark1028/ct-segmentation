@@ -74,11 +74,17 @@ class SAM2UNet(nn.Module):
         x = x.flatten(2).transpose(1, 2)  # [B, HW, C]
         num_patches = x.shape[1]
 
-        # 🔒 Safe positional embedding slicing
+        # ✅ interpolate pos_embed if shape mismatch
         pos_embed = self.sam.image_encoder.pos_embed  # [1, L, C]
-        if pos_embed.shape[1] < num_patches:
-            raise ValueError(f"Input patch count {num_patches} exceeds SAM pos_embed size {pos_embed.shape[1]}")
-        x = x + pos_embed[:, :num_patches, :]
+        if pos_embed.shape[1] != num_patches:
+            pos_embed = F.interpolate(
+                pos_embed.transpose(1, 2),         # [1, C, L]
+                size=num_patches,                  # → interpolate to num_patches
+                mode="linear",
+                align_corners=False
+            ).transpose(1, 2)                      # [1, num_patches, C]
+
+        x = x + pos_embed
         x = self.sam.image_encoder.pos_drop(x)
 
         # Step 3: Pass through transformer blocks
@@ -109,3 +115,4 @@ class SAM2UNet(nn.Module):
         # Step 8: Final resize
         out = F.interpolate(out, size=(H * 16, W * 16), mode='bilinear', align_corners=False)
         return out
+
