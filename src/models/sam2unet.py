@@ -112,6 +112,6 @@ class SAM2UNet(nn.Module):
         out = self.out_conv(d1)
 
         # Step 8: Final resize
-        out = F.interpolate(out, size=(H * 16, W * 16), mode='bilinear', align_corners=False)
+        out = F.interpolate(out, scale_factor=4, mode='bilinear', align_corners=False)
         return out
 
