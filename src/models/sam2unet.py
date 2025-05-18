@@ -66,6 +66,7 @@ class SAM2UNet(nn.Module):
         self.out_conv = nn.Conv2d(8, out_channels, kernel_size=1)
 
     def forward(self, x):
+        input_shape = x.shape  # [B, C, H, W] (여기서 C=1)
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
         x = self.sam.image_encoder.patch_embed(x)  # [B, H, W, C]
@@ -104,5 +105,5 @@ class SAM2UNet(nn.Module):
         d2 = self.up2(d3, s2)
         d1 = self.up1(d2, s1)
         out = self.out_conv(d1)
-        out = F.interpolate(out, scale_factor=2, mode='bilinear', align_corners=False)
+        out = F.interpolate(out, size=input_shape[2:], mode='bilinear', align_corners=False)
         return out
