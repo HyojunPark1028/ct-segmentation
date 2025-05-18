@@ -48,8 +48,12 @@ class SAM2UNet(nn.Module):
         for p in self.sam.image_encoder.parameters():
             p.requires_grad = False
         for name, p in self.sam.image_encoder.named_parameters():
-            if any(f"blocks.{i}" in name for i in range(4, 12)) or "norm" in name:
+            if any(f"blocks.{i}" in name for i in range(2, 12)) or "norm" in name:
                 p.requires_grad = True
+
+        trainable_params = [name for name, p in self.sam.image_encoder.named_parameters() if p.requires_grad]
+        print("Trainable SAM params:", trainable_params)
+
 
         # Main feature projector
         self.projector = ResidualProjector(in_channels=768, out_channels=128)
