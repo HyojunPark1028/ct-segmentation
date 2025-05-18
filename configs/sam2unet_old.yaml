@@ -1,9 +1,10 @@
 model:
   name: sam2unet
-  checkpoint: weights/sam2.1_hiera_base_plus.pt
-  config: configs/sam2.1/sam2.1_hiera_b+.yaml
-  img_size: 512
-
+  img_size: 256
+  patch_size: 32  # 기존 16에서 32로 증가
+  checkpoint: weights/sam_vit_b_01ec64.pth  # 메모리 절감을 위한 ViT-B 사용
+  grad_checkpointing: true
+  freeze_layers: 0  # 완전 fine-tune (일부 freeze 원할 경우 숫자 조정)
 
 experiment:
   name: sam2unet_hu_dice_focal_epoch50_pretrained

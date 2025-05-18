@@ -35,6 +35,7 @@ def compute_mask_coverage(model, loader, device, thr=0.5):
     with torch.no_grad():
         for x, y in loader:
             x, y = x.to(device), y.to(device)
+            y = (y > 0.5).float()  # ⭐ 강제 이진화
             pred = torch.sigmoid(model(x)) > thr
             inter = (pred * y).sum()
             gt_total += y.sum()

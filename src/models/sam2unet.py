@@ -1,123 +1,86 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from segment_anything import sam_model_registry
+from sam2.build_sam import build_sam2
 
-
-class ResidualProjector(nn.Module):
-    def __init__(self, in_channels=768, out_channels=256):  # ViT-B: 768 output
+class Adapter(nn.Module):
+    def __init__(self, channels, reduction_ratio=16):
         super().__init__()
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, 3, padding=1),
-            nn.GroupNorm(8, out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, 3, padding=1),
-            nn.GroupNorm(8, out_channels)
-        )
+        self.down = nn.Conv2d(channels, channels // reduction_ratio, 1)
+        self.up = nn.Conv2d(channels // reduction_ratio, channels, 1)
         self.relu = nn.ReLU(inplace=True)
-        self.identity = nn.Conv2d(in_channels, out_channels, 1) if in_channels != out_channels else nn.Identity()
 
     def forward(self, x):
-        return self.relu(self.conv(x) + self.identity(x))
-
+        return x + self.up(self.relu(self.down(x)))
 
 class UpBlock(nn.Module):
     def __init__(self, in_channels, skip_channels, out_channels):
         super().__init__()
-        self.up = nn.ConvTranspose2d(in_channels, out_channels, kernel_size=2, stride=2)
-        self.conv = nn.Sequential(
-            nn.Conv2d(out_channels + skip_channels, out_channels, 3, padding=1),
-            nn.GroupNorm(8, out_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, 3, padding=1),
-            nn.GroupNorm(8, out_channels),
-            nn.ReLU(inplace=True)
-        )
+        self.conv1 = nn.Conv2d(in_channels + skip_channels, out_channels, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1)
+        self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, skip):
-        x = self.up(x)
-        if skip.shape[-2:] != x.shape[-2:]:
-            skip = F.interpolate(skip, size=x.shape[-2:], mode='bilinear', align_corners=False)
-        return self.conv(torch.cat([x, skip], dim=1))
-
+        x = F.interpolate(x, scale_factor=2, mode='bilinear', align_corners=False)
+        x = torch.cat([x, skip], dim=1)
+        x = self.relu(self.conv1(x))
+        x = self.relu(self.conv2(x))
+        return x
 
 class SAM2UNet(nn.Module):
-    def __init__(self, checkpoint: str, in_channels: int = 1, out_channels: int = 1):
+    def __init__(self, checkpoint: str, config: str = "sam2/configs/sam2.1/sam2.1_hiera_b+.yaml", in_channels=1, out_channels=1):
         super().__init__()
-        self.sam = sam_model_registry["vit_b"](checkpoint=checkpoint)
-        for p in self.sam.image_encoder.parameters():
-            p.requires_grad = True
-        # for name, p in self.sam.image_encoder.named_parameters():
-        #     if any(f"blocks.{i}" in name for i in range(2, 12)) or "norm" in name:
-        #         p.requires_grad = True
+        sam2 = build_sam2(config, checkpoint)
+        self.encoder = sam2.image_encoder.trunk
 
-        trainable_params = [name for name, p in self.sam.image_encoder.named_parameters() if p.requires_grad]
-        print("Trainable SAM params:", trainable_params)
+        # LayerNorm은 학습 가능하도록 유지
+        for name, p in self.encoder.named_parameters():
+            if "norm" in name or "ln" in name:
+                p.requires_grad = True
+            else:
+                p.requires_grad = False
 
+        # Adapter 삽입 (stage output 이후)
+        self.adapters = nn.ModuleList([
+            Adapter(112), Adapter(224), Adapter(448), Adapter(896)
+        ])
 
-        # Main feature projector
-        self.projector = ResidualProjector(in_channels=768, out_channels=128)
-        # Skip channel reducers
-        # self.skip_proj4 = nn.Conv2d(768, 128, 1)
-        self.skip_proj4 = nn.Sequential(
-            nn.Conv2d(768, 128, 1),
-            nn.GroupNorm(8, 128),
-            nn.ReLU(inplace=True)
-        )
-        self.skip_proj3 = nn.Conv2d(768, 64, 1)
-        self.skip_proj2 = nn.Conv2d(768, 32, 1)
-        self.skip_proj1 = nn.Conv2d(768, 16, 1)
+        self.project_bottleneck = nn.Conv2d(896, 256, kernel_size=1)
+        self.project_skips = nn.ModuleList([
+            nn.Conv2d(448, 256, kernel_size=1),
+            nn.Conv2d(224, 256, kernel_size=1),
+            nn.Conv2d(112, 256, kernel_size=1)
+        ])
 
-        self.up4 = UpBlock(128, 128, 64)
-        self.up3 = UpBlock(64, 64, 32)
-        self.up2 = UpBlock(32, 32, 16)
-        self.up1 = UpBlock(16, 16, 8)
-        # self.out_conv = nn.Conv2d(8, out_channels, kernel_size=1)
+        self.up_blocks = nn.ModuleList([
+            UpBlock(256, 256, 256),
+            UpBlock(256, 256, 256),
+            UpBlock(256, 256, 128)
+        ])
+
         self.out_conv = nn.Sequential(
-            nn.GroupNorm(4, 8),
+            nn.Conv2d(128, 64, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(8, 1, kernel_size=1)
+            nn.Conv2d(64, out_channels, kernel_size=1)
         )
 
     def forward(self, x):
-        input_shape = x.shape  # [B, C, H, W] (여기서 C=1)
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
-        x = self.sam.image_encoder.patch_embed(x)  # [B, H, W, C]
-        B, H, W, C = x.shape
-        raw_embed = self.sam.image_encoder.pos_embed
-        if (raw_embed.shape[1], raw_embed.shape[2]) != (H, W):
-            raw_embed = raw_embed.permute(0, 3, 1, 2)
-            raw_embed = F.interpolate(raw_embed, size=(H, W), mode="bilinear", align_corners=False)
-            raw_embed = raw_embed.permute(0, 2, 3, 1)
-        pos_embed = raw_embed.expand(B, -1, -1, -1)
-        x = x + pos_embed
 
-        skips = []
-        for i, blk in enumerate(self.sam.image_encoder.blocks):
-            x = blk(x)  # [B, H, W, C]
-            if i == 2:
-                skips.append(x)
-            elif i == 4:
-                skips.append(x)
-            elif i == 6:
-                skips.append(x)
-            elif i == 8:
-                skips.append(x)
+        feats = self.encoder(x)  # [f0, f1, f2, f3]
+        assert len(feats) == 4
 
-        # Project main feature to 128
-        x = x.permute(0, 3, 1, 2)  # [B, C, H, W]
-        x = self.projector(x)       # [B, 128, H, W]
-        # Project skip features
-        s4 = self.skip_proj4(skips[3].permute(0, 3, 1, 2))  # [B, 128, H, W]
-        s3 = self.skip_proj3(skips[2].permute(0, 3, 1, 2))  # [B, 64, H, W]
-        s2 = self.skip_proj2(skips[1].permute(0, 3, 1, 2))  # [B, 32, H, W]
-        s1 = self.skip_proj1(skips[0].permute(0, 3, 1, 2))  # [B, 16, H, W]
+        # Adapter 통과
+        feats = [adapt(f) for adapt, f in zip(self.adapters, feats)]
 
-        d4 = self.up4(x, s4)
-        d3 = self.up3(d4, s3)
-        d2 = self.up2(d3, s2)
-        d1 = self.up1(d2, s1)
-        out = self.out_conv(d1)
-        out = F.interpolate(out, size=input_shape[2:], mode='bilinear', align_corners=False)
-        return out
+        x = self.project_bottleneck(feats[-1])
+        d4 = self.up_blocks[0](x, self.project_skips[0](feats[2]))
+        d3 = self.up_blocks[1](d4, self.project_skips[1](feats[1]))
+        d2 = self.up_blocks[2](d3, self.project_skips[2](feats[0]))
+
+        out = self.out_conv(d2)
+        out = F.interpolate(out, size=x.shape[2:] * 4, mode='bilinear', align_corners=False)
+
+        # Deep supervision: d2, d3, d4도 반환
+        return out, d4, d3, d2
