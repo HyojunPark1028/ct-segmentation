@@ -101,6 +101,7 @@ def train(cfg_path):
             preds = model(x)
             if isinstance(preds, tuple):
                 pred_main, *pred_deep = preds
+                print(f"[DEBUG] pred shape: {pred_main.shape}, y shape: {y.shape}")
                 loss = 0.7 * criterion(pred_main, y)
                 for p in pred_deep:
                     p_up = F.interpolate(p, size=y.shape[2:], mode="bilinear", align_corners=False)
