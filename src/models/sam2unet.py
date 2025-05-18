@@ -93,16 +93,17 @@ class SAM2UNet(nn.Module):
         # Step 3: Pass through transformer blocks
         skips = []
         for i, blk in enumerate(self.sam.image_encoder.blocks):
-            x = blk(x)
+            x = blk(x)  # [B, H, W, C]
             if i in [2, 4, 6, 8]:
                 skips.append(x)
 
-        # Step 4: Final LayerNorm
-        x = self.sam.image_encoder.norm(x)  # [B, HW, C]
+        # Step 4: Flatten, then LayerNorm
+        x_flat = x.reshape(B, H * W, C)  # [B, HW, C]
+        x = self.sam.image_encoder.norm(x_flat)  # [B, HW, C]
 
         # Step 5: Reshape to 2D feature map
-        x = x.transpose(1, 2).view(B, C, H, W)  # [B, C, H, W]
-        skips = [s.transpose(1, 2).view(B, C, H, W) for s in skips]
+        x = x.transpose(1, 2).contiguous().view(B, C, H, W)  # [B, C, H, W]
+        skips = [s.reshape(B, H * W, C).transpose(1, 2).contiguous().view(B, C, H, W) for s in skips]
 
         # Step 6: Projector
         x = self.projector(x)
