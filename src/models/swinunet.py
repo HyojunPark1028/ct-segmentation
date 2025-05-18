@@ -63,6 +63,11 @@ class SwinUNet(nn.Module):
         skip3 = self.backbone.layers[2](skip2)  # [B, H3, W3, 384]
         x = self.backbone.layers[3](skip3)      # [B, H4, W4, 768]
 
+        print("[DEBUG] skip1:", skip1.shape)  # 보통 [B, H, W, 96]
+        print("[DEBUG] skip2:", skip2.shape)  # 보통 [B, H, W, 192]
+        print("[DEBUG] skip3:", skip3.shape)  # 보통 [B, H, W, 384] → 현재 512
+        print("[DEBUG] x:", x.shape)          # 보통 [B, H, W, 768] → 현재 1024
+
         x = self.backbone.norm(x)
         B, H, W, C = x.shape
         x = x.permute(0, 3, 1, 2).contiguous()  # [B, C, H, W]
