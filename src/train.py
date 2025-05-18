@@ -4,6 +4,7 @@ import os, torch, pandas as pd
 import random, numpy as np
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
+import torch.nn.functional as F
 from tqdm import tqdm
 from datetime import datetime
 from .models.unet import UNet
@@ -102,7 +103,8 @@ def train(cfg_path):
                 pred_main, *pred_deep = preds
                 loss = 0.7 * criterion(pred_main, y)
                 for p in pred_deep:
-                    loss += 0.1 * criterion(p, y)
+                    p_up = F.interpolate(p, size=y.shape[2:], mode="bilinear", align_corners=False)
+                    loss += 0.1 * criterion(p_up, y)
             else:
                 loss = criterion(preds, y)
             opt.zero_grad(); loss.backward()
