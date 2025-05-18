@@ -17,7 +17,7 @@ from .dataset import NpySegDataset
 from .losses import get_loss
 from .evaluate import evaluate, compute_mask_coverage
 
-print("hello2")
+print("hello3")
 
 def seed_everything(seed=42):
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
