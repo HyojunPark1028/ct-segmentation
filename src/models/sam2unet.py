@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import sys
-sys.path.append("/content/sam2")  # clone 해온 경로 등록
+sys.path.append("/content/ct-segmentation/sam2")
 from sam2.build_sam import build_sam2
 
 class Adapter(nn.Module):
