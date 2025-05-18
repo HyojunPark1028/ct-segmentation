@@ -39,7 +39,7 @@ class SwinUNet(nn.Module):
         self.backbone = swin_base_patch4_window7_224(pretrained=use_pretrained)
         self.backbone.head = nn.Identity()
 
-        self.proj4 = nn.Conv2d(768, 384, kernel_size=1)
+        self.proj4 = nn.Conv2d(1024, 384, kernel_size=1)  # 수정 전: (768, 384)
         self.proj3 = nn.Conv2d(384, 192, kernel_size=1)
         self.proj2 = nn.Conv2d(192, 96, kernel_size=1)
         self.proj1 = nn.Conv2d(96, 48, kernel_size=1)
