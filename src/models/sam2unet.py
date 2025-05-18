@@ -72,7 +72,13 @@ class SAM2UNet(nn.Module):
 
         # Step 2: Flatten and add positional encoding
         x = x.flatten(2).transpose(1, 2)  # [B, HW, C]
-        x = x + self.sam.image_encoder.pos_embed[:, :x.shape[1], :]
+        num_patches = x.shape[1]
+
+        # 🔒 Safe positional embedding slicing
+        pos_embed = self.sam.image_encoder.pos_embed  # [1, L, C]
+        if pos_embed.shape[1] < num_patches:
+            raise ValueError(f"Input patch count {num_patches} exceeds SAM pos_embed size {pos_embed.shape[1]}")
+        x = x + pos_embed[:, :num_patches, :]
         x = self.sam.image_encoder.pos_drop(x)
 
         # Step 3: Pass through transformer blocks
