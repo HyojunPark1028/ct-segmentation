@@ -68,39 +68,34 @@ class SAM2UNet(nn.Module):
         # Step 1: Patchify image
         x = self.sam.image_encoder.patch_embed(x)  # [B, H, W, C]
         print(f"[DEBUG] patch_embed output: {x.shape}")
+        B, H, W, C = x.shape
 
         # [B, H, W, C] → [B, C, H, W]
-        x = x.permute(0, 3, 1, 2).contiguous()  # [4, 768, 16, 16]
+        x = x.permute(0, 3, 1, 2).contiguous()  # [B, C, H, W]
 
-        B, C, H, W = x.shape
+        # Flatten to [B, HW, C]
+        x = x.flatten(2).transpose(1, 2)  # [B, HW, C]
+        num_patches = x.shape[1]          # HW = 256
 
-        # Step 2: Flatten to [B, HW, C]
-        x = x.flatten(2).transpose(1, 2)  # [B, HW, C] = [4, 256, 768]
-        num_patches = x.shape[1]
-
-        # Step 3: Positional Embedding
+        # Positional embedding
         raw_embed = self.sam.image_encoder.pos_embed  # [1, L, C] or [1, C, H, W]
 
         if raw_embed.dim() == 4:
-            # raw_embed: [1, C, H, W] → [1, C, H*W] → [1, H*W, C]
             raw_embed = raw_embed.flatten(2).transpose(1, 2)  # [1, L, C]
 
-        # ❗ 여기가 핵심 수정 부분
-        L, C = raw_embed.shape[1], raw_embed.shape[2]
-        if L != num_patches:
-            # pos_embed: [1, L, C] → [1, C, L] → interpolate → [1, C, num_patches] → [1, num_patches, C]
+        if raw_embed.shape[1] != num_patches:
             interpolated_embed = F.interpolate(
-                raw_embed.transpose(1, 2),  # [1, C, L]
+                raw_embed.transpose(1, 2),     # [1, C, L]
                 size=num_patches,
                 mode="nearest"
-            ).transpose(1, 2)  # [1, num_patches, C]
+            ).transpose(1, 2)                  # [1, num_patches, C]
         else:
             interpolated_embed = raw_embed
 
-        # 🔒 이 시점에서 x.shape == [B, num_patches, C=768]
-        #                  interpolated_embed.shape == [1, num_patches, C=768]
+        print(f"[DEBUG] x shape: {x.shape}, interpolated_embed shape: {interpolated_embed.shape}")
         x = x + interpolated_embed
         x = self.sam.image_encoder.pos_drop(x)
+
 
         # Step 3: Pass through transformer blocks
         skips = []
