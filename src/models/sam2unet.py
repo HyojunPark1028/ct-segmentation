@@ -66,34 +66,32 @@ class SAM2UNet(nn.Module):
             x = x.repeat(1, 3, 1, 1)
 
         # Step 1: Patchify image
-        x = self.sam.image_encoder.patch_embed(x)  # [B, C=768, H/16, W/16]
+        x = self.sam.image_encoder.patch_embed(x)  # [B, H, W, C]
         print(f"[DEBUG] patch_embed output: {x.shape}")
-        B, C, H, W = x.shape
+        B, H, W, C = x.shape
 
-        # Step 2: Flatten and add positional encoding
-        x = x.flatten(2).transpose(1, 2)  # [B, HW, C]
+        # Step 2: Flatten to [B, HW, C]
+        x = x.view(B, -1, C)  # [B, 256, 768]
         num_patches = x.shape[1]
 
+        # Step 3: Positional Embedding 처리
+        raw_embed = self.sam.image_encoder.pos_embed  # [1, L, C] or [1, C, H, W]
 
-        raw_embed = self.sam.image_encoder.pos_embed  # [1, C, H, W] or [1, L, C]
-
-        # ✨ flatten if 4D
         if raw_embed.dim() == 4:
             raw_embed = raw_embed.flatten(2).transpose(1, 2)  # [1, L, C]
 
-        # → 이제 raw_embed.shape == [1, L, C]
         if raw_embed.shape[1] != num_patches:
             interpolated_embed = F.interpolate(
-                raw_embed.transpose(1, 2),     # [1, C, L]
+                raw_embed.transpose(1, 2),  # [1, C, L]
                 size=num_patches,
                 mode="nearest"
-            ).transpose(1, 2)                  # [1, num_patches, C]
+            ).transpose(1, 2)               # [1, num_patches, C]
         else:
             interpolated_embed = raw_embed
 
         x = x + interpolated_embed
-
         x = self.sam.image_encoder.pos_drop(x)
+
 
         # Step 3: Pass through transformer blocks
         skips = []
