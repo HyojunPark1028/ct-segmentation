@@ -4,6 +4,7 @@ import os, torch, pandas as pd
 import random, numpy as np
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
+import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
 from datetime import datetime
