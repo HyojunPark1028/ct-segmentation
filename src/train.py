@@ -12,6 +12,7 @@ from .models.swinunet import SwinUNet
 from .models.utransvision import UTransVision
 from .models.sam2unet import SAM2UNet
 from .models.medsam import MedSAM
+from .models.medsam2 import MedSAM2
 from .dataset import NpySegDataset
 from .losses import get_loss
 from .evaluate import evaluate, compute_mask_coverage
@@ -50,9 +51,9 @@ def train(cfg_path):
     # Dataset (pre‑split)
     # ✅ 모델에 따라 img_size 결정
     model_name = cfg.model.name.lower()
-    img_size = cfg.model.img_size if model_name in ["transunet", "swinunet", "medsam", "sam2unet"] else None
+    img_size = cfg.model.img_size if model_name in ["transunet", "swinunet", "medsam", "medsam2", "sam2unet"] else None
     use_pretrained = cfg.model.get("use_pretrained", False)
-    normalize_type = "sam" if cfg.model.name.lower() in ["medsam", "sam2unet"] else "default"
+    normalize_type = "sam" if cfg.model.name.lower() in ["medsam", "medsam2", "sam2unet"] else "default"
 
     # Dataset (pre‑split)
     tr_ds = NpySegDataset(os.path.join(cfg.data.root_dir, 'train'), augment=True, img_size=img_size, normalize_type=normalize_type)
@@ -75,6 +76,8 @@ def train(cfg_path):
         model = SAM2UNet(checkpoint=cfg.model.checkpoint).to(device)
     elif cfg.model.name.lower() == "medsam":
         model = MedSAM(checkpoint=cfg.model.checkpoint).to(device)
+    elif cfg.model.name.lower() == "medsam2":
+            model = MedSAM2(checkpoint=cfg.model.checkpoint).to(device)        
     else:
         raise ValueError(f"Unsupported model name: {cfg.model.name}")
 
@@ -174,3 +177,4 @@ def train(cfg_path):
 
     # Save test result
     pd.DataFrame([test_result]).to_csv(os.path.join(cfg.train.save_dir, "test_result.csv"), index=False)
+

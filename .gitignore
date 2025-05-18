@@ -1,6 +1,7 @@
 __pycache__/
 outputs/
 *.pth
+*.pt
 *.log
 wandb/
 *.ipynb_checkpoints/
