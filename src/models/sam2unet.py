@@ -70,34 +70,25 @@ class SAM2UNet(nn.Module):
         print(f"[DEBUG] patch_embed output: {x.shape}")
         B, H, W, C = x.shape
 
-        x = x.permute(0, 3, 1, 2).contiguous()  # [B, C, H, W]
-        x = x.flatten(2).transpose(1, 2)        # [B, HW, C]
-        num_patches = x.shape[1]
-
-        # Positional embedding
-        raw_embed = self.sam.image_encoder.pos_embed
+        raw_embed = self.sam.image_encoder.pos_embed  # [1, H', W', C]
         print(f"[DEBUG] pos_embed original shape: {raw_embed.shape}")
 
-        if raw_embed.dim() == 4:
-            # [1, H, W, C] → [1, HW, C]
-            H, W, C = raw_embed.shape[1], raw_embed.shape[2], raw_embed.shape[3]
-            raw_embed = raw_embed.view(1, H*W, C)  # [1, HW, C]
-        elif raw_embed.shape[-1] != 768:  # [1, 768, 64] 같은 경우
-            raw_embed = raw_embed.permute(0, 2, 1)  # [1, 64, 768]
+        # 만약 pos_embed의 H', W'가 H, W와 다르면 resize (interpolate)
+        if (raw_embed.shape[1], raw_embed.shape[2]) != (H, W):
+            # [1, H', W', C] -> [1, C, H', W'] -> interpolate -> [1, C, H, W] -> [1, H, W, C]
+            raw_embed = raw_embed.permute(0, 3, 1, 2)
+            raw_embed = F.interpolate(raw_embed, size=(H, W), mode="bilinear", align_corners=False)
+            raw_embed = raw_embed.permute(0, 2, 3, 1)
 
-        print(f"[DEBUG] pos_embed after shape: {raw_embed.shape}")
+        # pos_embed를 batch에 맞게 expand
+        pos_embed = raw_embed.expand(B, -1, -1, -1)  # [B, H, W, C]
 
-        if raw_embed.shape[1] != num_patches:
-            interpolated_embed = F.interpolate(
-                raw_embed.transpose(1, 2),
-                size=num_patches,
-                mode="nearest"
-            ).transpose(1, 2)
-        else:
-            interpolated_embed = raw_embed
+        # 더하기
+        x = x + pos_embed
 
-        print(f"[DEBUG] x shape: {x.shape}, interpolated_embed shape: {interpolated_embed.shape}")
-        x = x + interpolated_embed
+        # (transformer로 넘길 때 [B, H, W, C] 그대로!)
+        # 이후 로직은 transformer가 내부에서 알아서 처리
+
 
         # Step 3: Pass through transformer blocks
         skips = []
