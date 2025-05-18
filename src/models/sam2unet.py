@@ -5,7 +5,7 @@ from segment_anything import sam_model_registry
 
 
 class ResidualProjector(nn.Module):
-    def __init__(self, in_channels=256, out_channels=256):
+    def __init__(self, in_channels=768, out_channels=256):  # ViT-B: 768 output
         super().__init__()
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, 3, padding=1),
@@ -45,68 +45,61 @@ class SAM2UNet(nn.Module):
     def __init__(self, checkpoint: str, in_channels: int = 1, out_channels: int = 1):
         super().__init__()
 
-        # 1. Load SAM ViT-B encoder
         self.sam = sam_model_registry["vit_b"](checkpoint=checkpoint)
 
-        # 2. Freeze all layers except blocks.4~11 and norm
         for p in self.sam.image_encoder.parameters():
             p.requires_grad = False
         for name, p in self.sam.image_encoder.named_parameters():
             if any(f"blocks.{i}" in name for i in range(4, 12)) or "norm" in name:
                 p.requires_grad = True
 
-        # 3. Define projector
-        self.projector = ResidualProjector(in_channels=256, out_channels=256)
+        self.projector = ResidualProjector(in_channels=768, out_channels=256)
 
-        # 4. Decoder (SAM encoder 중간 feature 사용하여 skip connection 구성)
         self.up4 = UpBlock(256, 256, 128)
         self.up3 = UpBlock(128, 128, 64)
         self.up2 = UpBlock(64, 64, 32)
         self.up1 = UpBlock(32, 32, 16)
 
-        # 5. Final output layer
         self.out_conv = nn.Conv2d(16, out_channels, kernel_size=1)
 
     def forward(self, x):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
 
-        # ✅ Step 1: patch embedding
-        x = self.sam.image_encoder.patch_embed(x)
+        # Step 1: Patchify image
+        x = self.sam.image_encoder.patch_embed(x)  # [B, C=768, H/16, W/16]
+        B, C, H, W = x.shape
 
-        # 🐛 디버깅: patch_embed 출력 shape 확인
-        print(f"[DEBUG] patch_embed output shape: {x.shape}")
+        # Step 2: Flatten and add positional encoding
+        x = x.flatten(2).transpose(1, 2)  # [B, HW, C]
+        x = x + self.sam.image_encoder.pos_embed[:, :x.shape[1], :]
+        x = self.sam.image_encoder.pos_drop(x)
 
-        # ✅ Step 1.5: reshape to [B, C, H, W] if necessary
-        if x.ndim == 3:
-            # Case: [B, H*W, C] → [B, C, H, W]
-            B, N, C = x.shape
-            H = W = int(N ** 0.5)
-            x = x.view(B, H, W, C).permute(0, 3, 1, 2).contiguous()
-            print(f"[DEBUG] reshaped from [B, N, C] to: {x.shape}")
-        elif x.ndim == 4 and x.shape[-1] in (768, 256):
-            # Case: [B, H, W, C] → [B, C, H, W]
-            x = x.permute(0, 3, 1, 2).contiguous()
-            print(f"[DEBUG] permuted from [B, H, W, C] to: {x.shape}")
-
-        # ✅ Step 2: transformer blocks
-        feats = x
+        # Step 3: Pass through transformer blocks
         skips = []
         for i, blk in enumerate(self.sam.image_encoder.blocks):
-            feats = blk(feats)
+            x = blk(x)
             if i in [2, 4, 6, 8]:
-                skips.append(feats)
+                skips.append(x)
 
-        # ✅ Step 3: projector
-        feats = self.projector(feats)
+        # Step 4: Final LayerNorm
+        x = self.sam.image_encoder.norm(x)  # [B, HW, C]
 
-        # ✅ Step 4: decoder with skip connections
-        d4 = self.up4(feats, skips[-1])
+        # Step 5: Reshape to 2D feature map
+        x = x.transpose(1, 2).view(B, C, H, W)  # [B, C, H, W]
+        skips = [s.transpose(1, 2).view(B, C, H, W) for s in skips]
+
+        # Step 6: Projector
+        x = self.projector(x)
+        skips = [self.projector(s) for s in skips]
+
+        # Step 7: Decoder
+        d4 = self.up4(x, skips[-1])
         d3 = self.up3(d4, skips[-2])
         d2 = self.up2(d3, skips[-3])
         d1 = self.up1(d2, skips[-4])
         out = self.out_conv(d1)
 
-        # ✅ Step 5: resize to match input
-        out = F.interpolate(out, size=x.shape[2:], mode='bilinear', align_corners=False)
+        # Step 8: Final resize
+        out = F.interpolate(out, size=(H * 16, W * 16), mode='bilinear', align_corners=False)
         return out
