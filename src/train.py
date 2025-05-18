@@ -63,6 +63,13 @@ def train(cfg_path):
     vl_dl=DataLoader(vl_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
     ts_dl=DataLoader(ts_ds,batch_size=cfg.train.batch_size,shuffle=False,num_workers=cfg.train.num_workers)
 
+    # ✅ 디버깅: 실제 입력 이미지 크기 확인
+    print(f"[DEBUG] config img_size: {img_size}")
+    for x_dbg, y_dbg in tr_dl:
+        print(f"[DEBUG] one batch input shape: {x_dbg.shape}")  # 예상: [B, 1, 512, 512]
+        break
+
+
     # Model Selection
     if cfg.model.name.lower() == "unet":
         model=UNet(use_pretrained=use_pretrained).to(device)
