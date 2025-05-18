@@ -74,16 +74,16 @@ class SAM2UNet(nn.Module):
         x = x.flatten(2).transpose(1, 2)  # [B, HW, C]
         num_patches = x.shape[1]
 
-        pos_embed = self.sam.image_encoder.pos_embed  # [1, L, C]
-        if pos_embed.shape[1] != num_patches:
-            pos_embed = F.interpolate(
-                pos_embed.transpose(1, 2),         # [1, C, L]
-                size=num_patches,
-                mode="nearest",                    # ✅ 수정된 안전 모드
-            ).transpose(1, 2)                      # [1, num_patches, C]
+        raw_embed = self.sam.image_encoder.pos_embed  # [1, L, C]  (L = 12288)
 
+        # ✅ Always interpolate to match x.shape[1]
+        interpolated_embed = F.interpolate(
+            raw_embed.transpose(1, 2),      # [1, C, L]
+            size=num_patches,               # 256
+            mode="nearest"
+        ).transpose(1, 2)                   # [1, 256, C]
 
-        x = x + pos_embed
+        x = x + interpolated_embed         # ✅ 여기서만 사용, 원본 덮지 않음
         x = self.sam.image_encoder.pos_drop(x)
 
         # Step 3: Pass through transformer blocks
