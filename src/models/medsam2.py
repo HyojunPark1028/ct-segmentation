@@ -8,71 +8,55 @@ from segment_anything import sam_model_registry, SamPredictor
 
 class MedSAM2(nn.Module):
     """
-    MedSAM2: A prompt-driven segmentation model for medical images
-    based on Segment Anything Model 2 (SAM2) with full-image prompt.
-
-    Usage in your training pipeline:
+    MedSAM2: full-model checkpoint for medical image segmentation
+    Usage:
         model = MedSAM2(
-            sam_checkpoint=cfg.model.sam_checkpoint,
-            med_checkpoint=cfg.model.med_checkpoint,
+            checkpoint=cfg.model.checkpoint,  # e.g. "weights/MedSAM2_latest.pt"
             model_type="vit_b",
             image_size=512,
             device=device,
         )
     """
     def __init__(self,
-                 sam_checkpoint: str,
-                 med_checkpoint: str = None,
+                 checkpoint: str,
                  model_type: str = "vit_b",
                  image_size: int = 512,
                  device: str = None):
         super().__init__()
-        # Set device
+        # device 설정
         self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.image_size = image_size
 
-        # Load SAM2 backbone with official weights
-        self.sam = sam_model_registry[model_type](checkpoint=sam_checkpoint)
+        # SAM2 전체 모델 체크포인트 로드
+        self.sam = sam_model_registry[model_type](checkpoint=checkpoint)
         self.sam.to(self.device)
 
-        # If MedSAM2 head checkpoint provided, load its weights (nested under 'model')
-        if med_checkpoint:
-            ckpt = torch.load(med_checkpoint, map_location=self.device)
-            # Some checkpoints nest weights under 'model' key
-            state = ckpt.get('model', ckpt)
-            # load only matching keys
-            self.sam.load_state_dict(state, strict=False)
-
-        # Predictor for prompt-based segmentation
+        # Prompt 기반 세그멘테이션 예측기
         self.predictor = SamPredictor(self.sam)
 
-        # Precomputed full-image bounding box prompt
-        # Format: [x_min, y_min, x_max, y_max]
+        # 전체 이미지 바운딩 박스 프롬프트
         self.full_box = np.array([0, 0, image_size - 1, image_size - 1])[None, :]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward pass for a batch of 2D slices or RGB images.
-
         Args:
-            x: Tensor of shape (B, C, H, W). C can be 1 (grayscale) or 3 (RGB).
+            x: Tensor of shape (B, C, H, W) -- C=1 or 3
         Returns:
-            logits: Tensor of shape (B, 1, H, W) with raw mask logits.
+            logits: Tensor of shape (B, 1, H, W)
         """
         B, C, H, W = x.shape
         x = x.to(self.device)
 
-        # Replicate single-channel to three for SAM
+        # 흑백 이미지는 3채널로 복제
         if C == 1:
             x = x.repeat(1, 3, 1, 1)
 
-        # Resize for SAM input
+        # SAM 입력 크기로 리사이즈
         x_resized = torch.nn.functional.interpolate(
             x, size=(self.image_size, self.image_size), mode='bilinear', align_corners=False
         )
 
         logits_list = []
-        # Process each sample due to predictor API
         for i in range(B):
             img_np = x_resized[i].permute(1, 2, 0).cpu().numpy()
             self.predictor.set_image(img_np)
@@ -85,8 +69,8 @@ class MedSAM2(nn.Module):
             logit = torch.from_numpy(logits[0]).to(self.device)
             logits_list.append(logit)
 
-        batch_logits = torch.stack(logits_list, dim=0).unsqueeze(1)  # (B,1,H,W)
-        # Restore original resolution
+        # 배치 텐서로 스택 후 원해상도로 되돌리기
+        batch_logits = torch.stack(logits_list, dim=0).unsqueeze(1)
         batch_logits = torch.nn.functional.interpolate(
             batch_logits, size=(H, W), mode='bilinear', align_corners=False
         )
