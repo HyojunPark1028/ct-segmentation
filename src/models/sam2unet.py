@@ -98,10 +98,6 @@ class SAM2UNet(nn.Module):
 
         print(f"[DEBUG] x shape: {x.shape}, interpolated_embed shape: {interpolated_embed.shape}")
         x = x + interpolated_embed
-        x = self.sam.image_encoder.pos_drop(x)
-
-
-
 
         # Step 3: Pass through transformer blocks
         skips = []
