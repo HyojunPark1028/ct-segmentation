@@ -105,7 +105,7 @@ def train(cfg_path):
                 loss = 0.7 * criterion(pred_main, y)
                 for i, p in enumerate(pred_deep):
                     try:
-                        print(f"[DEBUG] pred_deep[{i}] shape: {p.shape}")
+                        # print(f"[DEBUG] pred_deep[{i}] shape: {p.shape}")
                         h, w = y.shape[2], y.shape[3]
 
                         # 1️⃣ 채널 수 1로 줄이기
@@ -114,7 +114,7 @@ def train(cfg_path):
                         # 2️⃣ 업샘플링
                         p_up = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
 
-                        print(f"[DEBUG] p_up shape: {p_up.shape}")
+                        # print(f"[DEBUG] p_up shape: {p_up.shape}")
                         loss += 0.1 * criterion(p_up, y)
                     except Exception as e:
                         print(f"[ERROR] in deep supervision loss for p[{i}]: {e}")
