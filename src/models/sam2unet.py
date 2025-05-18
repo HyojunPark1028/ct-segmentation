@@ -79,16 +79,8 @@ class SAM2UNet(nn.Module):
             if i in [2, 4, 6, 8]:  # select 4 skip levels
                 skips.append(feats)
 
-        feats = self.sam.image_encoder.neck(self.sam.image_encoder.norm(feats))  # final features
+        # ⛔️ Remove norm + neck —> ✅ Use raw 2D feature output
         feats = self.projector(feats)
 
         # 🟢 Decoder with skip connections
-        d4 = self.up4(feats, skips[-1])  # highest resolution
-        d3 = self.up3(d4, skips[-2])
-        d2 = self.up2(d3, skips[-3])
-        d1 = self.up1(d2, skips[-4])
-        out = self.out_conv(d1)
-
-        # 🔴 Resize output
-        out = F.interpolate(out, size=x.shape[2:], mode='bilinear', align_corners=False)
-        return out
+        d4 = self.up4(feats, skips[-1])
