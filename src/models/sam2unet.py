@@ -71,16 +71,15 @@ class SAM2UNet(nn.Module):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
 
-        # ✅ Step 1: patch embedding
+        # ✅ Step 1: patch embedding only (no pos_drop)
         x = self.sam.image_encoder.patch_embed(x)  # [B, 256, H/16, W/16]
-        x = self.sam.image_encoder.pos_drop(x)     # optional positional dropout
 
-        # ✅ Step 2: pass through ViT blocks
+        # ✅ Step 2: transformer block traversal
         feats = x
         skips = []
         for i, blk in enumerate(self.sam.image_encoder.blocks):
             feats = blk(feats)
-            if i in [2, 4, 6, 8]:  # extract skip features
+            if i in [2, 4, 6, 8]:
                 skips.append(feats)
 
         # ✅ Step 3: projector
@@ -93,6 +92,6 @@ class SAM2UNet(nn.Module):
         d1 = self.up1(d2, skips[-4])
         out = self.out_conv(d1)
 
-        # ✅ Step 5: resize to match input
+        # ✅ Step 5: final output resize
         out = F.interpolate(out, size=x.shape[2:], mode='bilinear', align_corners=False)
         return out
