@@ -1,6 +1,6 @@
 model:
   name: sam2unet
-  img_size: 1024
+  img_size: 512
   patch_size: 32  # 기존 16에서 32로 증가
   checkpoint: weights/sam_vit_b_01ec64.pth  # 메모리 절감을 위한 ViT-B 사용
   grad_checkpointing: true
