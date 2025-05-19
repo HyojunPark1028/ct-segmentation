@@ -35,6 +35,10 @@ class SAM2UNet(nn.Module):
         sam2 = build_sam2(config, checkpoint)
         self.encoder = sam2.image_encoder.trunk
 
+        # ViT encoder 전체 unfreeze
+        for p in self.encoder.parameters():
+            p.requires_grad = True
+
         # LayerNorm은 학습 가능하도록 유지
         for name, p in self.encoder.named_parameters():
             if "norm" in name or "ln" in name:
