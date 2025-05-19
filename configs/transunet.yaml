@@ -4,7 +4,7 @@ model:
   img_size: 224
 
 experiment:
-  name: transunet_hu_dice_bce_epoch50_pretrained
+  name: transunet_hu_dice_focal_epoch50_pretrained
   seed: 42
 
 data:
@@ -15,8 +15,8 @@ train:
   batch_size: 4
   epochs: 50
   lr: 3e-4
-  loss: dice_bce
-  save_dir: outputs/transunet_hu_dice_bce_epoch50_pretrained
+  loss: dice_focal
+  save_dir: outputs/transunet_hu_dice_focal_epoch50_pretrained
   num_workers: 4
   patience: 10
 

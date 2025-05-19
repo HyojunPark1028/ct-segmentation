@@ -7,7 +7,7 @@ model:
   freeze_layers: 0  # 완전 fine-tune (일부 freeze 원할 경우 숫자 조정)
 
 experiment:
-  name: medsam_hu_dice_bce_epoch50_pretrained
+  name: medsam_hu_dice_focal_epoch50_pretrained
   seed: 42
 
 data:
@@ -18,8 +18,8 @@ train:
   batch_size: 4
   epochs: 50
   lr: 3e-4
-  loss: dice_bce
-  save_dir: outputs/medsam_dice_bce_epoch50_pretrained
+  loss: dice_focal
+  save_dir: outputs/medsam_dice_focal_epoch50_pretrained
   num_workers: 4
   patience: 10
   use_amp: true
