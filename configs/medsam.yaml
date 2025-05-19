@@ -17,7 +17,7 @@ data:
 train:
   batch_size: 4
   epochs: 50
-  lr: 3e-4
+  lr: 0.0001
   loss: dice_focal
   save_dir: outputs/medsam_dice_focal_epoch50_pretrained
   num_workers: 4

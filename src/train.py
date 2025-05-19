@@ -4,7 +4,6 @@ import os, torch, pandas as pd
 import random, numpy as np
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
-from torch.optim.lr_scheduler import OneCycleLR
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -19,8 +18,6 @@ from .dataset import NpySegDataset
 from .losses import get_loss
 from .evaluate import evaluate, compute_mask_coverage
 
-print("hello4")
-
 def seed_everything(seed=42):
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
     random.seed(seed)
@@ -31,7 +28,7 @@ def seed_everything(seed=42):
     os.environ["PYTHONHASHSEED"] = str(seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    torch.use_deterministic_algorithms(False)
+    torch.use_deterministic_algorithms(True)
 
 def seed_worker(worker_id):
     worker_seed = 42 + worker_id
@@ -80,15 +77,8 @@ def train(cfg_path):
     else:
         raise ValueError(f"Unsupported model name: {cfg.model.name}")
 
-    opt = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=1e-5)
-    scheduler = OneCycleLR(
-        opt,
-        max_lr=cfg.train.lr,
-        steps_per_epoch=len(tr_dl),
-        epochs=cfg.train.epochs,
-        pct_start=0.3,
-    )
-    criterion = get_loss()
+    opt=torch.optim.Adam(model.parameters(), lr=cfg.train.lr)
+    criterion=get_loss()
 
     history = []
     best_dice = 0
@@ -123,8 +113,6 @@ def train(cfg_path):
             del preds, loss
             torch.cuda.empty_cache(); gc.collect()
 
-        scheduler.step()
-
         model.eval(); vloss = 0
         with torch.no_grad():
             for x_val, y_val in vl_dl:
@@ -152,7 +140,7 @@ def train(cfg_path):
 
     pd.DataFrame(history).to_csv(os.path.join(cfg.train.save_dir, 'metrics.csv'), index=False)
 
-    model.load_state_dict(torch.load(os.path.join(cfg.train.save_dir, "model_best.pth"), weights_only=False))
+    model.load_state_dict(torch.load(os.path.join(cfg.train.save_dir, "model_best.pth")))
     model.eval(); test_loss = 0
     test_start = time.time()
     with torch.no_grad():
