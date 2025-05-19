@@ -86,7 +86,7 @@ def train(cfg_path):
         max_lr=cfg.train.lr,
         steps_per_epoch=len(tr_dl),
         epochs=cfg.train.epochs,
-        pct_start=0.1,
+        pct_start=0.3,
     )
     criterion = get_loss()
 
