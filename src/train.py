@@ -12,7 +12,7 @@ from .models.unet import UNet
 from .models.transunet import TransUNet
 from .models.swinunet import SwinUNet
 from .models.utransvision import UTransVision
-# from .models.sam2unet import SAM2UNet
+from .models.sam2unet import SAM2UNet
 from .models.medsam import MedSAM
 from .models.medsam2 import MedSAM2
 from .dataset import NpySegDataset
@@ -62,11 +62,6 @@ def train(cfg_path):
     vl_dl = DataLoader(vl_ds, batch_size=cfg.train.batch_size, shuffle=False, num_workers=cfg.train.num_workers)
     ts_dl = DataLoader(ts_ds, batch_size=cfg.train.batch_size, shuffle=False, num_workers=cfg.train.num_workers)
 
-    print(f"[DEBUG] config img_size: {img_size}")
-    for x_dbg, y_dbg in tr_dl:
-        print(f"[DEBUG] one batch input shape: {x_dbg.shape}")
-        break
-
     if model_name == "unet":
         model = UNet(use_pretrained=use_pretrained).to(device)
     elif model_name == "transunet":
@@ -77,8 +72,8 @@ def train(cfg_path):
         model = UTransVision(img_size=cfg.model.img_size, num_classes=1, use_pretrained=use_pretrained).to(device)
     # elif model_name == "sam2unet_old":
     #     model = SAM2UNet(checkpoint=cfg.model.checkpoint).to(device)
-    # elif model_name == "sam2unet":
-    #     model = SAM2UNet(checkpoint=cfg.model.checkpoint, config=cfg.model.config).to(device)
+    elif model_name == "sam2unet":
+        model = SAM2UNet(checkpoint=cfg.model.checkpoint, config=cfg.model.config).to(device)
     elif model_name == "medsam":
         model = MedSAM(checkpoint=cfg.model.checkpoint).to(device)
     elif model_name == "medsam2":
