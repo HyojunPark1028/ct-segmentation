@@ -13,7 +13,6 @@ from .models.unet import UNet
 from .models.transunet import TransUNet
 from .models.swinunet import SwinUNet
 from .models.utransvision import UTransVision
-from .models.sam2unet import SAM2UNet
 from .models.medsam import MedSAM
 from .models.medsam2 import MedSAM2
 from .dataset import NpySegDataset
@@ -72,6 +71,7 @@ def train(cfg_path):
     elif model_name == "utransvision":
         model = UTransVision(img_size=cfg.model.img_size, num_classes=1, use_pretrained=use_pretrained).to(device)
     elif model_name == "sam2unet":
+        from .models.sam2unet import SAM2UNet
         model = SAM2UNet(checkpoint=cfg.model.checkpoint, config=cfg.model.config).to(device)
     elif model_name == "medsam":
         model = MedSAM(checkpoint=cfg.model.checkpoint).to(device)
