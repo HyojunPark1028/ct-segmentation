@@ -4,6 +4,7 @@ import os, torch, pandas as pd
 import random, numpy as np
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import OneCycleLR
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -12,7 +13,7 @@ from .models.unet import UNet
 from .models.transunet import TransUNet
 from .models.swinunet import SwinUNet
 from .models.utransvision import UTransVision
-# from .models.sam2unet import SAM2UNet
+from .models.sam2unet import SAM2UNet
 from .models.medsam import MedSAM
 from .models.medsam2 import MedSAM2
 from .dataset import NpySegDataset
@@ -70,8 +71,8 @@ def train(cfg_path):
         model = SwinUNet(img_size=cfg.model.img_size, num_classes=1, use_pretrained=use_pretrained).to(device)
     elif model_name == "utransvision":
         model = UTransVision(img_size=cfg.model.img_size, num_classes=1, use_pretrained=use_pretrained).to(device)
-    # elif model_name == "sam2unet":
-        # model = SAM2UNet(checkpoint=cfg.model.checkpoint, config=cfg.model.config).to(device)
+    elif model_name == "sam2unet":
+        model = SAM2UNet(checkpoint=cfg.model.checkpoint, config=cfg.model.config).to(device)
     elif model_name == "medsam":
         model = MedSAM(checkpoint=cfg.model.checkpoint).to(device)
     elif model_name == "medsam2":
@@ -80,7 +81,13 @@ def train(cfg_path):
         raise ValueError(f"Unsupported model name: {cfg.model.name}")
 
     opt = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr, weight_decay=1e-5)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=cfg.train.epochs)
+    scheduler = OneCycleLR(
+        opt,
+        max_lr=cfg.train.lr,
+        steps_per_epoch=len(tr_dl),
+        epochs=cfg.train.epochs,
+        pct_start=0.1,
+    )
     criterion = get_loss()
 
     history = []
@@ -96,13 +103,13 @@ def train(cfg_path):
             preds = model(x)
             if isinstance(preds, tuple):
                 pred_main, *pred_deep = preds
-                loss = 0.85 * criterion(pred_main, y)
+                loss = 0.9 * criterion(pred_main, y)
                 for i, p in enumerate(pred_deep):
                     try:
                         h, w = y.shape[2], y.shape[3]
                         p = nn.Conv2d(p.shape[1], 1, kernel_size=1).to(p.device)(p)
                         p_up = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
-                        loss += 0.05 * criterion(p_up, y)
+                        loss += 0.1 * criterion(p_up, y)
                     except Exception as e:
                         print(f"[ERROR] in deep supervision loss for p[{i}]: {e}")
                         raise
