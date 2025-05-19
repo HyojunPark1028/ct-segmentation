@@ -16,7 +16,7 @@ data:
 train:
   batch_size: 4
   epochs: 50
-  lr: 0.0001
+  lr: 3e-4
   loss: dice_bce
   save_dir: outputs/sam2unet_dice_bce_epoch50_pretrained
   num_workers: 4
