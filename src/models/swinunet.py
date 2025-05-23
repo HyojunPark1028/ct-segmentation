@@ -49,25 +49,19 @@ class SwinUNet(nn.Module):
         self.img_size = img_size 
         
         # Initialize backbone with _out_indices to get intermediate features for skip connections
+        # This will populate self.backbone.feature_info
         self.backbone = swin_base_patch4_window7_224(pretrained=use_pretrained, _out_indices=(0, 1, 2, 3))
         self.backbone.head = nn.Identity() 
 
-        # Get expected channel dimensions from the backbone's embed_dim
-        # Swin-Base (swin_base_patch4_window7_224) typically has embed_dim=128
-        # The stages then scale by 2x for each subsequent stage's output channels.
-        embed_dim = self.backbone.embed_dim
-        self.backbone_out_channels = [
-            embed_dim,          # Stage 1 (Layer 0) output: 128
-            embed_dim * 2,      # Stage 2 (Layer 1) output: 256
-            embed_dim * 4,      # Stage 3 (Layer 2) output: 512
-            embed_dim * 8       # Stage 4 (Layer 3) output: 1024 (bottleneck)
-        ]
+        # Get actual output channel dimensions from the backbone's feature_info
+        # This is the most robust way to get the exact channel counts for each stage
+        self.backbone_out_channels = [info['chs'] for info in self.backbone.feature_info]
 
         # Proj layers: adjust input channels based on actual backbone outputs
-        self.proj4 = nn.Conv2d(self.backbone_out_channels[3], 384, kernel_size=1) # Bottleneck: 1024 -> 384
-        self.proj3 = nn.Conv2d(self.backbone_out_channels[2], 192, kernel_size=1) # Skip3: 512 -> 192
-        self.proj2 = nn.Conv2d(self.backbone_out_channels[1], 96, kernel_size=1)  # Skip2: 256 -> 96
-        self.proj1 = nn.Conv2d(self.backbone_out_channels[0], 48, kernel_size=1)  # Skip1: 128 -> 48
+        self.proj4 = nn.Conv2d(self.backbone_out_channels[3], 384, kernel_size=1) # Bottleneck
+        self.proj3 = nn.Conv2d(self.backbone_out_channels[2], 192, kernel_size=1) # Skip3
+        self.proj2 = nn.Conv2d(self.backbone_out_channels[1], 96, kernel_size=1)  # Skip2
+        self.proj1 = nn.Conv2d(self.backbone_out_channels[0], 48, kernel_size=1)  # Skip1
 
         # Decoder stages
         self.decoder3 = SwinDecoderBlock(384, 192, 192)
