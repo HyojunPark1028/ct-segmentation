@@ -7,16 +7,18 @@ class PatchExpanding(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         self.linear = nn.Linear(input_dim, 2 * input_dim)
-        self.norm = nn.LayerNorm(2 * input_dim)
+        self.norm = nn.LayerNorm(2 * input_dim)  # 반드시 2 * input_dim과 일치
         self.output_dim = input_dim // 2
 
     def forward(self, x):
         B, C, H, W = x.shape
-        x = x.permute(0, 2, 3, 1).contiguous()
-        x = self.linear(x)
-        x = self.norm(x)
-        x = rearrange(x, 'b h w (p1 p2 c_out) -> b c_out (h p1) (w p2)', p1=2, p2=2, c_out=self.output_dim)
+        x = x.permute(0, 2, 3, 1).contiguous()  # (B, H, W, C)
+        x = self.linear(x)                      # (B, H, W, 2C)
+        x = self.norm(x)                        # 마지막 차원이 2C와 일치해야 함
+        x = rearrange(x, 'b h w (p1 p2 c_out) -> b c_out (h p1) (w p2)',
+                      p1=2, p2=2, c_out=self.output_dim)
         return x
+
 
 class SwinDecoderBlock(nn.Module):
     def __init__(self, in_dim, skip_dim, out_dim):
