@@ -63,7 +63,6 @@ class DecoderStage(nn.Module):
         # x: 이전 디코더 단계 또는 병목에서 오는 특징 (B, H, W, C_x)
         # skip: 인코더에서 오는 스킵 연결 특징 (B, H_skip, W_skip, C_skip)
         
-        # Patch Expanding 계층을 통해 x를 업샘플링
         x = self.patch_expanding(x) # 출력: (B, 2H, 2W, in_channels // 2)
 
         # 스킵 연결 특징과 공간 차원이 일치하는지 확인 (안전 장치)
@@ -89,6 +88,7 @@ class DecoderStage(nn.Module):
 class SwinUNet(nn.Module):
     def __init__(self, img_size=224, num_classes=1, use_pretrained=True):
         super().__init__()
+        self.img_size = img_size # img_size를 저장하여 H, W 계산에 사용
         # timm 라이브러리의 사전 학습된 Swin Transformer 백본 사용
         self.backbone = swin_base_patch4_window7_224(pretrained=use_pretrained)
         # 분류 헤드 제거 (분할 작업에 필요 없음)
@@ -122,28 +122,45 @@ class SwinUNet(nn.Module):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1) # (B, 3, H, W)
 
-        # 인코더 경로 (Swin Transformer 백본)
-        # timm 백본의 내부 레이어에 접근하여 중간 특징 맵과 해상도 정보 추출
-        # patch_embed 출력: (B, num_patches, embed_dim)
+        B_orig = x.size(0)
+        
+        # Patch embedding 후의 초기 공간 해상도 계산
+        # swin_base_patch4_window7_224의 patch_size는 (4, 4)
+        H, W = self.img_size // self.backbone.patch_embed.patch_size[0], \
+               self.img_size // self.backbone.patch_embed.patch_size[1]
+        
+        # Patch embedding
+        # 출력: (B, num_patches, embed_dim)
         x = self.backbone.patch_embed(x) 
 
+        # 인코더 계층 및 스킵 연결
+        # 각 layer(BasicLayer)는 내부적으로 PatchMerging을 수행하여 H와 W를 절반으로 줄입니다.
+        # 출력 x는 (B, num_patches_new, C_new) 형태입니다.
+        
         # Layer 0 (Stage 1)
-        # forward_features는 (x, H, W)를 반환합니다. x는 (B, num_patches, C) 형태
-        x, H0, W0 = self.backbone.layers[0].forward_features(x) 
+        x = self.backbone.layers[0](x)
+        # Layer 0 후의 H와 W 계산: H_prev -> (H_prev + 1) // 2
+        H0, W0 = (H + 1) // 2, (W + 1) // 2 
         # 스킵 연결을 위해 (B, H, W, C) 형태로 재구성
-        skip1 = x.view(x.size(0), H0, W0, -1) 
+        skip1 = x.view(B_orig, H0, W0, -1) 
 
         # Layer 1 (Stage 2)
-        x, H1, W1 = self.backbone.layers[1].forward_features(x)
-        skip2 = x.view(x.size(0), H1, W1, -1)
+        x = self.backbone.layers[1](x)
+        # Layer 1 후의 H와 W 계산
+        H1, W1 = (H0 + 1) // 2, (W0 + 1) // 2 
+        skip2 = x.view(B_orig, H1, W1, -1)
 
         # Layer 2 (Stage 3)
-        x, H2, W2 = self.backbone.layers[2].forward_features(x)
-        skip3 = x.view(x.size(0), H2, W2, -1)
+        x = self.backbone.layers[2](x)
+        # Layer 2 후의 H와 W 계산
+        H2, W2 = (H1 + 1) // 2, (W1 + 1) // 2 
+        skip3 = x.view(B_orig, H2, W2, -1)
 
         # Layer 3 (Stage 4 - 병목)
-        x, H3, W3 = self.backbone.layers[3].forward_features(x)
-        x = x.view(x.size(0), H3, W3, -1)
+        x = self.backbone.layers[3](x)
+        # Layer 3 후의 H와 W 계산
+        H3, W3 = (H2 + 1) // 2, (W2 + 1) // 2 
+        x = x.view(B_orig, H3, W3, -1)
 
         # 병목 특징에 정규화 적용
         x = self.backbone.norm(x)
@@ -155,21 +172,15 @@ class SwinUNet(nn.Module):
         skip1_proj = self.proj1(skip1)
 
         # 디코더 경로
-        # Decoder 3: 병목 특징과 skip3_proj 연결
         x = self.decoder3(x_bottleneck, skip3_proj) # 출력: (B, H2, W2, 192)
-
-        # Decoder 2: 이전 디코더 출력과 skip2_proj 연결
         x = self.decoder2(x, skip2_proj) # 출력: (B, H1, W1, 96)
-
-        # Decoder 1: 이전 디코더 출력과 skip1_proj 연결
         x = self.decoder1(x, skip1_proj) # 출력: (B, H0, W0, 48)
 
         # 최종 출력 전 특징 맵 형태 변경 (B, C, H, W)
-        x = x.permute(0, 3, 1, 2).contiguous() # (B, 48, H0, W0)
+        x = x.permute(0, 3, 1, 2).contiguous()
 
         # 최종 업샘플링 및 컨볼루션
         x = self.final_upsample(x)
         x = self.final_conv(x)
 
         return x
-
