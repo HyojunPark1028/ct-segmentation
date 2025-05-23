@@ -112,6 +112,9 @@ def main(cfg):
 
     all_fold_best_metrics = [] # 각 폴드의 '최고' 성능 결과 저장
     
+    # 모델의 총 파라미터 수를 저장할 변수 (첫 폴드에서 한 번만 계산)
+    total_trainable_parameters = 0
+
     # --- 2. K-Fold 루프 시작 ---
     for fold, (train_index, val_index) in enumerate(kf.split(all_image_full_paths)): # kf.split은 리스트 길이에 따라 인덱스 반환
         print(f"\n--- Starting Fold {fold + 1}/5 ---")
@@ -145,6 +148,12 @@ def main(cfg):
 
         # 매 폴드마다 새로운 모델 초기화
         model = get_model(cfg, device)
+        
+        # ⭐ 모델 파라미터 수 계산 (첫 번째 폴드에서만)
+        if fold == 0:
+            total_trainable_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            print(f"Model has {total_trainable_parameters:,} trainable parameters.")
+
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr)
         criterion = get_loss()
 
@@ -168,6 +177,11 @@ def main(cfg):
             # 훈련 루프
             for k, (x, y) in enumerate(tqdm(train_dl, desc=f"Fold {fold+1} Epoch {epoch}")):
                 x, y = x.to(device), y.to(device)
+                
+                # ⭐ 마스크(target) 텐서의 채널 위치를 (N, C, H, W)로 맞춤
+                if y.ndim == 4 and y.shape[-1] == 1: 
+                    y = y.permute(0, 3, 1, 2) # N H W C -> N C H W
+
                 optimizer.zero_grad()
                 output = model(x)
                 if isinstance(output, tuple):
@@ -192,6 +206,11 @@ def main(cfg):
             with torch.no_grad():
                 for x_val, y_val in val_dl:
                     x_val, y_val = x_val.to(device), y_val.to(device)
+                    
+                    # ⭐ 마스크(target) 텐서의 채널 위치를 (N, C, H, W)로 맞춤
+                    if y_val.ndim == 4 and y_val.shape[-1] == 1: 
+                        y_val = y_val.permute(0, 3, 1, 2) # N H W C -> N C H W
+
                     pred = model(x_val)
                     if isinstance(pred, tuple):
                         pred = pred[0]
@@ -252,12 +271,27 @@ def main(cfg):
             print(f"Warning: No best model saved for Fold {fold+1}. Using current model state.")
         model.eval()
 
-        # 이 폴드의 검증 세트에 대한 최종 평가 (최적 모델 사용)
+        # ⭐ 인퍼런스 타임 측정
+        # DataLoader의 각 배치에 대한 추론 시간 측정 (단일 이미지 아닌 배치 단위)
+        inference_times = []
+        with torch.no_grad():
+            for x_val, _ in val_dl: # y_val은 인퍼런스 시간에 직접적으로 영향을 주지 않으므로 _로 받음
+                x_val = x_val.to(device)
+                torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
+                start_inference = time.time()
+                _ = model(x_val)
+                torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
+                end_inference = time.time()
+                inference_times.append(end_inference - start_inference)
+        
+        # 배치당 평균 인퍼런스 시간 계산
+        avg_inference_time_per_batch = np.mean(inference_times) if inference_times else 0.0
+        print(f"  Fold {fold+1} Average Inference Time per Batch (seconds): {avg_inference_time_per_batch:.6f}")
+
+
         val_dice_at_best, val_iou_at_best = evaluate(model, val_dl, device, cfg.data.threshold, vis=False)
         coverage_stats_val = compute_mask_coverage(model, val_dl, device, cfg.data.threshold)
 
-        # best_val_loss는 Early Stopping에 사용된 로스 값 (저장된 모델의 기준)
-        # val_dice_at_best, val_iou_at_best는 best_val_loss를 달성한 시점의 모델로 재평가한 값
         fold_best_metrics_entry = {
             'fold': fold + 1,
             'best_val_loss': best_val_loss,
@@ -266,7 +300,8 @@ def main(cfg):
             'val_mask_coverage_gt_total': coverage_stats_val['gt_total'].item(),
             'val_mask_coverage_pred_total': coverage_stats_val['pred_total'].item(),
             'val_mask_coverage_inter_total': coverage_stats_val['inter_total'].item(),
-            'val_mask_coverage_ratio': coverage_stats_val['mask_coverage_ratio']
+            'val_mask_coverage_ratio': coverage_stats_val['mask_coverage_ratio'],
+            'val_inference_time_per_batch': avg_inference_time_per_batch # ⭐ 새로 추가된 필드
         }
         all_fold_best_metrics.append(fold_best_metrics_entry)
         
@@ -288,9 +323,16 @@ def main(cfg):
     print(df_best_fold_results)
 
     avg_final_results = df_best_fold_results.mean(numeric_only=True).to_dict()
+    # ⭐ 모델 파라미터 수 최종 결과에 추가
+    avg_final_results['total_trainable_parameters'] = total_trainable_parameters
+
     print("\nAverage Best Validation Results Across Folds:")
     for k, v in avg_final_results.items():
-        print(f"  {k}: {v:.4f}")
+        # 파라미터 수는 정수로 표시
+        if k == 'total_trainable_parameters':
+            print(f"  {k}: {int(v):,}") # ,를 사용하여 천 단위 구분 기호 추가
+        else:
+            print(f"  {k}: {v:.4f}")
 
     # 최종 결과 저장 디렉토리 생성
     output_dir = cfg.train.save_dir
