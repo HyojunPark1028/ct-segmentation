@@ -21,8 +21,9 @@ train:
   loss: dice_focal
   save_dir: outputs/medsam_dice_focal_epoch50_pretrained
   num_workers: 4
-  patience: 15
+  patience: 10
   use_amp: true
+  k_folds: 5
 
 eval:
   visualize: true

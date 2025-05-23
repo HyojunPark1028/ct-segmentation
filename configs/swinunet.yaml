@@ -19,6 +19,7 @@ train:
   save_dir: outputs/swinunet_dice_focal_epoch50_pretrained
   num_workers: 4
   patience: 10
+  k_folds: 5
 
 eval:
   visualize: true
