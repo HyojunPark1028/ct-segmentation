@@ -31,8 +31,10 @@ class PatchExpanding(nn.Module):
 class SwinDecoderBlock(nn.Module):
     def __init__(self, in_dim, skip_dim, out_dim):
         super().__init__()
-        self.up = PatchExpanding(in_dim) 
-        self.concat_proj = nn.Conv2d((in_dim // 2) + skip_dim, out_dim, kernel_size=1)
+        self.up = PatchExpanding(in_dim)
+        # PatchExpanding의 출력 채널은 이제 in_dim이므로,
+        # skip_dim과 합쳐서 in_dim + skip_dim이 되어야 합니다.
+        self.concat_proj = nn.Conv2d(in_dim + skip_dim, out_dim, kernel_size=1)
         self.block = nn.Sequential(
             nn.Conv2d(out_dim, out_dim, 3, padding=1),
             nn.GroupNorm(8, out_dim),
