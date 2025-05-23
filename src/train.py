@@ -456,37 +456,22 @@ def main(cfg):
     test_mask_paths = [os.path.join(test_mask_dir, f.replace('.npy', '.png')) for f in test_files]
 
     if test_image_paths:
-        # K-Fold 모델 중 가장 좋은 성능을 보인 폴드의 모델을 로드하여 테스트
-        # 또는 모든 K-Fold 모델의 앙상블을 사용할 수 있지만, 여기서는 편의상
-        # 첫 번째 폴드의 best model (또는 가장 마지막 폴드의 best model)을 예시로 사용
-        # 실제 시나리오에서는 K-Fold 학습 완료 후 전체 학습 데이터로 다시 모델을 학습시켜 테스트셋을 평가하는 것이 이상적
-        
-        # 모델 다시 초기화 및 가중치 로드 (예: 가장 좋은 폴드의 모델을 로드하거나, 새로 학습)
-        # 여기서는 K-Fold 학습의 대표적인 모델 중 하나를 선택하여 로드합니다.
-        # 가장 좋은 폴드의 모델을 선택하려면 all_fold_best_metrics를 분석해야 하지만,
-        # 편의상 마지막 폴드의 best model을 로드하거나, 별도의 "final_model.pth"를 저장하는 로직이 필요
-        
-        # for simplicity, let's just initialize a new model and state that a trained model needs to be loaded
+
         final_model = get_model(cfg, device)
-        
-        # 실제 사용 시, 여기서는 K-Fold를 통해 얻은 "최종 모델"을 로드해야 합니다.
-        # 예를 들어, K-Fold 결과에서 가장 좋은 성능을 보인 폴드의 `model_best.pth`를 로드하거나,
-        # 전체 학습 데이터를 사용하여 새로 학습된 모델을 로드합니다.
-        
-        # ⚠️ WARNING: 아래 코드는 예시이며, 실제 배포 모델 로딩 로직은 사용 사례에 따라 달라져야 합니다.
-        # 여기서는 K-Fold에서 평균적으로 가장 좋았던 모델의 `state_dict`를 로드하기 위한
-        # 로직이 명확하지 않으므로, 이 부분을 사용자에게 맡깁니다.
-        # 만약 "가장 좋았던 폴드의 모델"을 로드하고 싶다면, `df_best_fold_results`를 분석하여
-        # `best_val_dice`가 가장 높았던 폴드의 `model_best.pth` 경로를 찾아 로드해야 합니다.
-        
-        print("\nNote: For final test set evaluation, it's recommended to train a model on the full training dataset (combined K-Fold data) or select the best performing model from K-Fold. Loading a placeholder model here.")
-        # 예시: 임시로 마지막 폴드의 best_model을 로드한다고 가정
-        last_fold_best_model_path = os.path.join(cfg.train.save_dir, f"fold_{cfg.train.k_folds}", "model_best.pth")
-        if os.path.exists(last_fold_best_model_path):
-            final_model.load_state_dict(torch.load(last_fold_best_model_path))
-            print(f"Loaded model from {last_fold_best_model_path} for final test evaluation.")
+
+        # K-Fold 결과에서 가장 높은 best_val_dice를 기록한 폴드 찾기
+        if not df_best_fold_results.empty:
+            best_fold_row = df_best_fold_results.loc[df_best_fold_results['best_val_dice'].idxmax()]
+            best_fold_num = int(best_fold_row['fold'])
+            best_model_path_for_test = os.path.join(cfg.train.save_dir, f"fold_{best_fold_num}", "model_best.pth")
+            
+            if os.path.exists(best_model_path_for_test):
+                final_model.load_state_dict(torch.load(best_model_path_for_test))
+                print(f"Loaded best performing model from Fold {best_fold_num} ({best_model_path_for_test}) for final test evaluation.")
+            else:
+                print(f"Warning: Best model for Fold {best_fold_num} not found at {best_model_path_for_test}. Using newly initialized model for test evaluation.")
         else:
-            print("No last fold best model found for loading. Using newly initialized model for test evaluation.")
+            print("No K-Fold results found to select the best model. Using newly initialized model for test evaluation.")
 
         final_model.eval()
         
