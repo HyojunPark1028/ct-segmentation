@@ -48,14 +48,18 @@ class SwinUNet(nn.Module):
         super().__init__()
         self.img_size = img_size 
         
-        # Initialize backbone with _out_indices to get intermediate features for skip connections
-        # This will populate self.backbone.feature_info
-        self.backbone = swin_base_patch4_window7_224(pretrained=use_pretrained, _out_indices=(0, 1, 2, 3))
+        # Initialize backbone WITHOUT _out_indices, we will manually extract features
+        self.backbone = swin_base_patch4_window7_224(pretrained=use_pretrained)
         self.backbone.head = nn.Identity() 
 
-        # Get actual output channel dimensions from the backbone's feature_info
-        # This is the most robust way to get the exact channel counts for each stage
-        self.backbone_out_channels = [info['num_chs'] for info in self.backbone.feature_info]
+        # Get expected channel dimensions from the backbone's embed_dim
+        embed_dim = self.backbone.embed_dim
+        self.backbone_out_channels = [
+            embed_dim,          # Stage 1 (Layer 0) output: 128
+            embed_dim * 2,      # Stage 2 (Layer 1) output: 256
+            embed_dim * 4,      # Stage 3 (Layer 2) output: 512
+            embed_dim * 8       # Stage 4 (Layer 3) output: 1024 (bottleneck)
+        ]
 
         # Proj layers: adjust input channels based on actual backbone outputs
         self.proj4 = nn.Conv2d(self.backbone_out_channels[3], 384, kernel_size=1) # Bottleneck
@@ -81,23 +85,35 @@ class SwinUNet(nn.Module):
 
         B = x.size(0)
 
-        # Get intermediate features from the backbone using forward_features with _out_indices
-        # `features` will be a list of (B, L, C) tensors, where L is H*W
-        features = self.backbone.forward_features(x)
+        # Initial patch embedding
+        # Output is (B, L, C) where L = H_initial * W_initial
+        x = self.backbone.patch_embed(x)
+        
+        # Initial H, W after patch_embed
+        H, W = self.img_size // self.backbone.patch_embed.patch_size[0], \
+               self.img_size // self.backbone.patch_embed.patch_size[1] # 56, 56
 
-        # Calculate spatial dimensions for each stage's output
-        # Based on original img_size=224 and patch_size=4
-        H_s1, W_s1 = self.img_size // 4, self.img_size // 4 # 56x56 for features[0]
-        H_s2, W_s2 = self.img_size // 8, self.img_size // 8 # 28x28 for features[1]
-        H_s3, W_s3 = self.img_size // 16, self.img_size // 16 # 14x14 for features[2]
-        H_s4, W_s4 = self.img_size // 32, self.img_size // 32 # 7x7 for features[3]
+        # Manually extract features from backbone layers
+        # Layer 0 (Stage 1)
+        x = self.backbone.layers[0](x) # Output (B, L, C) where L = H*W
+        skip1 = x.view(B, H, W, self.backbone_out_channels[0]).permute(0, 3, 1, 2).contiguous() # (B, 128, 56, 56)
 
-        # Reshape (B, L, C) to (B, H, W, C) and then permute to (B, C, H, W)
-        # Use .contiguous() after permute for proper memory layout
-        skip1 = features[0].view(B, H_s1, W_s1, self.backbone_out_channels[0]).permute(0, 3, 1, 2).contiguous()
-        skip2 = features[1].view(B, H_s2, W_s2, self.backbone_out_channels[1]).permute(0, 3, 1, 2).contiguous()
-        skip3 = features[2].view(B, H_s3, W_s3, self.backbone_out_channels[2]).permute(0, 3, 1, 2).contiguous()
-        bottleneck = features[3].view(B, H_s4, W_s4, self.backbone_out_channels[3]).permute(0, 3, 1, 2).contiguous()
+        # Layer 1 (Stage 2) - includes PatchMerging
+        H, W = H // 2, W // 2 # 28, 28
+        x = self.backbone.layers[1](x) # Output (B, L, C) where L = H*W
+        skip2 = x.view(B, H, W, self.backbone_out_channels[1]).permute(0, 3, 1, 2).contiguous() # (B, 256, 28, 28)
+
+        # Layer 2 (Stage 3) - includes PatchMerging
+        H, W = H // 2, W // 2 # 14, 14
+        x = self.backbone.layers[2](x) # Output (B, L, C) where L = H*W
+        skip3 = x.view(B, H, W, self.backbone_out_channels[2]).permute(0, 3, 1, 2).contiguous() # (B, 512, 14, 14)
+
+        # Layer 3 (Stage 4 - Bottleneck) - includes PatchMerging
+        H, W = H // 2, W // 2 # 7, 7
+        x = self.backbone.layers[3](x) # Output (B, L, C) where L = H*W
+        # Apply final normalization from backbone
+        x = self.backbone.norm(x) # This norm is applied to the token sequence (B, L, C)
+        bottleneck = x.view(B, H, W, self.backbone_out_channels[3]).permute(0, 3, 1, 2).contiguous() # (B, 1024, 7, 7)
 
         # Apply proj layers to adjust channel counts
         x = self.proj4(bottleneck) # x becomes the input to the first decoder block (decoder3)
