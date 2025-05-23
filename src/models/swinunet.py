@@ -113,6 +113,7 @@ class SwinUNet(nn.Module):
         self.final_upsample = nn.Upsample(scale_factor=4, mode='bilinear', align_corners=False)
 
     def forward(self, x):
+        # Handle grayscale images - convert to RGB if needed
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
         
@@ -159,56 +160,5 @@ class SwinUNet(nn.Module):
         x = x.permute(0, 2, 3, 1)  # (B, H, W, C)
         x = self.classifier(x)      # (B, H, W, num_classes)
         x = x.permute(0, 3, 1, 2)  # (B, num_classes, H, W)
-        
-        return x
-
-# Simplified version for testing
-class SwinUNetSimple(nn.Module):
-    def __init__(self, img_size=224, num_classes=1, use_pretrained=True):
-        super().__init__()
-        
-        # Load pretrained backbone
-        self.backbone = swin_base_patch4_window7_224(pretrained=use_pretrained)
-        
-        # Simple decoder with conv layers (for stability)
-        self.decoder = nn.Sequential(
-            nn.ConvTranspose2d(1024, 512, 2, 2),  # Upsample
-            nn.GroupNorm(32, 512),
-            nn.GELU(),
-            nn.ConvTranspose2d(512, 256, 2, 2),   # Upsample
-            nn.GroupNorm(16, 256),
-            nn.GELU(),
-            nn.ConvTranspose2d(256, 128, 2, 2),   # Upsample
-            nn.GroupNorm(8, 128),
-            nn.GELU(),
-            nn.ConvTranspose2d(128, 64, 2, 2),    # Upsample
-            nn.GroupNorm(4, 64),
-            nn.GELU(),
-            nn.Conv2d(64, num_classes, 1)         # Final classification
-        )
-
-    def forward(self, x):
-        if x.shape[1] == 1:
-            x = x.repeat(1, 3, 1, 1)
-        
-        B = x.size(0)
-        
-        # Encoder
-        x = self.backbone.patch_embed(x)
-        if self.backbone.patch_embed.norm is not None:
-            x = self.backbone.patch_embed.norm(x)
-        
-        # Pass through all backbone layers
-        for layer in self.backbone.layers:
-            x = layer(x)
-        
-        # Convert to spatial format
-        # x shape: (B, L, C) where L = H*W, C = 1024
-        B, L, C = x.shape
-        H = W = int(L**0.5)  # Assuming square feature maps
-        x = x.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
-        
-        # Decode
-        x = self.decoder(x)
         
         return x
