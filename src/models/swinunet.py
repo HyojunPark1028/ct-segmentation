@@ -61,13 +61,37 @@ class SwinUNet(nn.Module):
     def forward(self, x):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
-        features = self.backbone(x)
-        skip1, skip2, skip3, bottleneck = features
+
+        # Swin Transformer forward
+        B = x.size(0)
+        x = self.backbone.patch_embed(x)
+        H, W = self.backbone.patch_embed.grid_size
+        x = x.view(B, H, W, -1)
+
+        skip1 = self.backbone.layers[0](x)
+        H1, W1 = H // 2, W // 2
+        skip1 = skip1.view(B, H1, W1, -1).permute(0, 3, 1, 2)
+
+        skip2 = self.backbone.layers[1](skip1.permute(0, 2, 3, 1))
+        H2, W2 = H1 // 2, W1 // 2
+        skip2 = skip2.view(B, H2, W2, -1).permute(0, 3, 1, 2)
+
+        skip3 = self.backbone.layers[2](skip2.permute(0, 2, 3, 1))
+        H3, W3 = H2 // 2, W2 // 2
+        skip3 = skip3.view(B, H3, W3, -1).permute(0, 3, 1, 2)
+
+        bottleneck = self.backbone.layers[3](skip3.permute(0, 2, 3, 1))
+        H4, W4 = H3 // 2, W3 // 2
+        bottleneck = bottleneck.view(B, H4, W4, -1).permute(0, 3, 1, 2)
+
         x = self.proj4(bottleneck)
         skip3 = self.proj3(skip3)
         skip2 = self.proj2(skip2)
         skip1 = self.proj1(skip1)
+
         x = self.decoder3(x, skip3)
         x = self.decoder2(x, skip2)
         x = self.decoder1(x, skip1)
+
         return self.final(x)
+
