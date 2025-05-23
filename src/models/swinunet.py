@@ -164,18 +164,44 @@ class SwinUNet(nn.Module):
     
     def extract_features(self, x):
         """Extract features from Swin backbone"""
+        # Debug: Print input shape
+        print(f"Input shape: {x.shape}")
+        
         # Patch embedding
         x = self.backbone.patch_embed(x)
+        print(f"After patch_embed: {x.shape}")
+        
         if self.backbone.patch_embed.norm is not None:
             x = self.backbone.patch_embed.norm(x)
+            print(f"After patch_embed norm: {x.shape}")
         
         # Pass through all layers
-        for layer in self.backbone.layers:
+        for i, layer in enumerate(self.backbone.layers):
             x = layer(x)
+            print(f"After layer {i}: {x.shape}")
         
-        # Convert back to spatial format
-        B, L, C = x.shape
-        H = W = int(L**0.5)
-        x = x.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
+        # Check if we have the norm layer
+        if hasattr(self.backbone, 'norm') and self.backbone.norm is not None:
+            x = self.backbone.norm(x)
+            print(f"After final norm: {x.shape}")
         
+        # Handle different output shapes
+        if len(x.shape) == 3:  # (B, L, C)
+            B, L, C = x.shape
+            H = W = int(L**0.5)
+            x = x.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
+        elif len(x.shape) == 2:  # (B, C) - pooled output
+            # This happens when the model has been pooled/averaged
+            # We need to handle this case differently
+            B, C = x.shape
+            # Create a spatial feature map by reshaping
+            # Assuming we want a small spatial size like 7x7
+            spatial_size = 7
+            x = x.view(B, C, 1, 1).expand(B, C, spatial_size, spatial_size)
+        elif len(x.shape) == 4:  # (B, C, H, W) - already in correct format
+            pass
+        else:
+            raise ValueError(f"Unexpected output shape from backbone: {x.shape}")
+        
+        print(f"Final output shape: {x.shape}")
         return x
