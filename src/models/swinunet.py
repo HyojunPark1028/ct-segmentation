@@ -2,22 +2,24 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F # F.interpolate 사용을 위해 임포트
 from timm.models.swin_transformer import swin_base_patch4_window7_224
-from einops import rearrange 
 
 class PatchExpanding(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
-        self.linear = nn.Linear(input_dim, 2 * input_dim)
-        self.norm = nn.LayerNorm(2 * input_dim)
-        self.output_dim = input_dim // 2 
+        # input_dim -> input_dim // 2 로 줄이면서 해상도 2배 확대
+        self.proj = nn.Conv2d(input_dim, input_dim * 4, kernel_size=1)
+        self.pixel_shuffle = nn.PixelShuffle(2)
+        self.norm = nn.LayerNorm(input_dim // 2) # PixelShuffle 후 채널
+        self.output_dim = input_dim // 2
 
     def forward(self, x):
-        B, C, H, W = x.shape
-        x = x.permute(0, 2, 3, 1).contiguous() # (B, H, W, C)
-        x = self.linear(x)                     # (B, H, W, 2C)
+        # x: (B, C, H, W)
+        x = self.proj(x) # (B, C*4, H, W)
+        x = self.pixel_shuffle(x) # (B, C, H*2, W*2)
+        # LayerNorm은 (B, C, H, W) -> (B, H, W, C) 로 변경 후 적용
+        x = x.permute(0, 2, 3, 1).contiguous()
         x = self.norm(x)
-        x = rearrange(x, 'b h w (p1 p2 c_out) -> b c_out (h p1) (w p2)',
-                      p1=2, p2=2, c_out=self.output_dim)
+        x = x.permute(0, 3, 1, 2).contiguous()
         return x
 
 class SwinDecoderBlock(nn.Module):
