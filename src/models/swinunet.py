@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F # F.interpolate 사용을 위해 임포트
 from timm.models.swin_transformer import swin_base_patch4_window7_224
 
 # 사용자께서 제공하신 ConvBlock 클래스
@@ -29,15 +30,16 @@ class UpBlock(nn.Module):
         self.conv = ConvBlock(out_channels + skip_channels, out_channels)
 
     def forward(self, x, skip):
-        # x: 이전 디코더 단계의 출력
-        # skip: 인코더에서 오는 스킵 연결 특징
+        # x: 이전 디코더 단계의 출력 (B, C, H, W)
+        # skip: 인코더에서 오는 스킵 연결 특징 (B, C, H_skip, W_skip)
         
         # 업샘플링 수행
         x = self.up(x)
         
         # 업샘플링된 x와 스킵 연결 특징의 공간 해상도가 일치하지 않을 경우 보간
+        # Conv2d는 (B, C, H, W) 형태를 기대하므로, 이 형태를 유지한 채 보간합니다.
         if x.shape[-2:] != skip.shape[-2:]:
-            x = nn.functional.interpolate(x, size=skip.shape[-2:], mode="bilinear", align_corners=False)
+            x = F.interpolate(x, size=skip.shape[-2:], mode="bilinear", align_corners=False)
         
         # 채널 차원(dim=1)을 따라 x와 skip을 연결
         x = torch.cat([x, skip], dim=1)
@@ -53,10 +55,8 @@ class SwinUNet(nn.Module):
         
         # timm 라이브러리의 사전 학습된 Swin Transformer 백본 사용
         # _out_indices를 설정하여 각 단계의 특징 맵을 반환하도록 구성
-        # 0: Stage 1 (Layer 0) 출력
-        # 1: Stage 2 (Layer 1) 출력
-        # 2: Stage 3 (Layer 2) 출력
-        # 3: Stage 4 (Layer 3) 출력, 즉 병목 특징
+        # timm Swin Transformer의 forward_features는 (B, H, W, C) 형태로 반환합니다.
+        # 따라서 이후 Conv2d에 전달하기 위해 permute가 필요합니다.
         self.backbone = swin_base_patch4_window7_224(pretrained=use_pretrained, _out_indices=(0, 1, 2, 3))
         # 분류 헤드 제거 (분할 작업에 필요 없음)
         self.backbone.head = nn.Identity()
@@ -88,16 +88,15 @@ class SwinUNet(nn.Module):
             x = x.repeat(1, 3, 1, 1) # (B, 3, H, W)
 
         # timm 백본의 forward_features를 호출하여 각 단계의 특징 맵 리스트를 얻음
-        # features 리스트의 각 요소는 (B, C, H, W) 형태의 텐서입니다.
-        # [0]: Stage 1 (128ch, H/4, W/4), [1]: Stage 2 (256ch, H/8, W/8),
-        # [2]: Stage 3 (512ch, H/16, W/16), [3]: Stage 4 (1024ch, H/32, W/32)
+        # features 리스트의 각 요소는 (B, H, W, C) 형태의 텐서입니다.
         features = self.backbone.forward_features(x)
         
         # 각 스킵 연결 특징과 병목 특징 추출
-        skip1 = features[0] # (B, 128, H/4, W/4)
-        skip2 = features[1] # (B, 256, H/8, W/8)
-        skip3 = features[2] # (B, 512, H/16, W/16)
-        bottleneck = features[3] # (B, 1024, H/32, W/32)
+        # Conv2d에 전달하기 위해 (B, C, H, W)로 permute해야 합니다.
+        skip1 = features[0].permute(0, 3, 1, 2).contiguous() # (B, 128, H/4, W/4)
+        skip2 = features[1].permute(0, 3, 1, 2).contiguous() # (B, 256, H/8, W/8)
+        skip3 = features[2].permute(0, 3, 1, 2).contiguous() # (B, 512, H/16, W/16)
+        bottleneck = features[3].permute(0, 3, 1, 2).contiguous() # (B, 1024, H/32, W/32)
 
         # proj 계층 (nn.Conv2d)을 통해 채널 수 조정
         proj_bottleneck = self.proj4(bottleneck)
