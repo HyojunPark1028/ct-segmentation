@@ -55,7 +55,7 @@ class SwinUNet(nn.Module):
 
         # Get actual output channel dimensions from the backbone's feature_info
         # This is the most robust way to get the exact channel counts for each stage
-        self.backbone_out_channels = [info['chs'] for info in self.backbone.feature_info]
+        self.backbone_out_channels = [info['num_chs'] for info in self.backbone.feature_info]
 
         # Proj layers: adjust input channels based on actual backbone outputs
         self.proj4 = nn.Conv2d(self.backbone_out_channels[3], 384, kernel_size=1) # Bottleneck
