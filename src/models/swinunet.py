@@ -88,15 +88,28 @@ class SwinUNet(nn.Module):
             x = x.repeat(1, 3, 1, 1) # (B, 3, H, W)
 
         # timm 백본의 forward_features를 호출하여 각 단계의 특징 맵 리스트를 얻음
-        # features 리스트의 각 요소는 (B, H, W, C) 형태의 텐서입니다.
+        # features 리스트의 각 요소는 (B, H*W, C) 형태의 텐서입니다.
         features = self.backbone.forward_features(x)
         
         # 각 스킵 연결 특징과 병목 특징 추출
-        # Conv2d에 전달하기 위해 (B, C, H, W)로 permute해야 합니다.
-        skip1 = features[0].permute(0, 3, 1, 2).contiguous() # (B, 128, H/4, W/4)
-        skip2 = features[1].permute(0, 3, 1, 2).contiguous() # (B, 256, H/8, W/8)
-        skip3 = features[2].permute(0, 3, 1, 2).contiguous() # (B, 512, H/16, W/16)
-        bottleneck = features[3].permute(0, 3, 1, 2).contiguous() # (B, 1024, H/32, W/32)
+        # Swin Transformer의 각 Stage 출력은 (B, L, C) 형태이므로, (B, H, W, C)로 reshape 후 permute해야 합니다.
+        
+        # img_size = 224, patch_size = 4
+        # Stage 1 (skip1): H/4, W/4 = 56x56
+        H_s1, W_s1 = self.img_size // 4, self.img_size // 4
+        skip1 = features[0].view(x.size(0), H_s1, W_s1, -1).permute(0, 3, 1, 2).contiguous() # (B, 128, H/4, W/4)
+
+        # Stage 2 (skip2): H/8, W/8 = 28x28
+        H_s2, W_s2 = self.img_size // 8, self.img_size // 8
+        skip2 = features[1].view(x.size(0), H_s2, W_s2, -1).permute(0, 3, 1, 2).contiguous() # (B, 256, H/8, W/8)
+
+        # Stage 3 (skip3): H/16, W/16 = 14x14
+        H_s3, W_s3 = self.img_size // 16, self.img_size // 16
+        skip3 = features[2].view(x.size(0), H_s3, W_s3, -1).permute(0, 3, 1, 2).contiguous() # (B, 512, H/16, W/16)
+
+        # Stage 4 (bottleneck): H/32, W/32 = 7x7
+        H_s4, W_s4 = self.img_size // 32, self.img_size // 32
+        bottleneck = features[3].view(x.size(0), H_s4, W_s4, -1).permute(0, 3, 1, 2).contiguous() # (B, 1024, H/32, W/32)
 
         # proj 계층 (nn.Conv2d)을 통해 채널 수 조정
         proj_bottleneck = self.proj4(bottleneck)
