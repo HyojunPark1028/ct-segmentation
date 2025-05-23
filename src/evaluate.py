@@ -1,10 +1,32 @@
 import torch, pandas as pd, matplotlib.pyplot as plt
-# from .models.medsam import MedSAM  # MedSAM 분기 처리를 위해 import
+# from .models.medsam import MedSAM  # MedSAM 분기 처리를 위해 import
 
 def _metric(pred, tgt, thr):
-    p=(pred>thr).float(); inter=(p*tgt).sum(); union=p.sum()+tgt.sum()-inter
-    dice=(2*inter+1e-6)/(p.sum()+tgt.sum()+1e-6); iou=(inter+1e-6)/(union+1e-6)
-    return dice.item(), iou.item()
+    # Ensure pred and tgt are binary (0 or 1)
+    p = (pred > thr).float() # Predicted binary mask
+    tgt = (tgt > 0.5).float() # Ground truth binary mask (explicitly binarize again to be safe)
+
+    inter = (p * tgt).sum()
+    union = p.sum() + tgt.sum() - inter
+
+    # Handle cases where both masks are empty
+    if p.sum() == 0 and tgt.sum() == 0:
+        dice = 1.0
+        iou = 1.0
+    else:
+        # Avoid division by zero for dice
+        dice_denominator = p.sum() + tgt.sum()
+        dice = (2 * inter + 1e-6) / (dice_denominator + 1e-6)
+
+        # Avoid division by zero for iou
+        iou_denominator = union
+        iou = (inter + 1e-6) / (iou_denominator + 1e-6)
+
+    # Ensure dice and iou are within [0, 1] range in case of numerical instability
+    dice = torch.clamp(dice, 0.0, 1.0).item()
+    iou = torch.clamp(iou, 0.0, 1.0).item()
+    
+    return dice, iou
 
 def _vis(img, m, p, thr):
     import numpy as np
