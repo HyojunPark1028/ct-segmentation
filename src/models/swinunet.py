@@ -7,18 +7,15 @@ class PatchExpanding(nn.Module):
     def __init__(self, input_dim):
         super().__init__()
         self.linear = nn.Linear(input_dim, 2 * input_dim)
-        self.norm = nn.LayerNorm(2 * input_dim)  # 반드시 2 * input_dim과 일치
         self.output_dim = input_dim // 2
 
     def forward(self, x):
         B, C, H, W = x.shape
         x = x.permute(0, 2, 3, 1).contiguous()  # (B, H, W, C)
-        x = self.linear(x)                      # (B, H, W, 2C)
-        x = self.norm(x)                        # 마지막 차원이 2C와 일치해야 함
+        x = self.linear(x)  # (B, H, W, 2C)
         x = rearrange(x, 'b h w (p1 p2 c_out) -> b c_out (h p1) (w p2)',
                       p1=2, p2=2, c_out=self.output_dim)
         return x
-
 
 class SwinDecoderBlock(nn.Module):
     def __init__(self, in_dim, skip_dim, out_dim):
@@ -64,27 +61,26 @@ class SwinUNet(nn.Module):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
 
-        # Swin Transformer forward
         B = x.size(0)
         x = self.backbone.patch_embed(x)
         H, W = self.backbone.patch_embed.grid_size
         x = x.view(B, H, W, -1)
 
-        skip1 = self.backbone.layers[0](x)
+        x = self.backbone.layers[0](x)
         H1, W1 = H // 2, W // 2
-        skip1 = skip1.view(B, H1, W1, -1).permute(0, 3, 1, 2)
+        skip1 = x.view(B, H1, W1, -1).permute(0, 3, 1, 2)
 
-        skip2 = self.backbone.layers[1](skip1.permute(0, 2, 3, 1))
+        x = self.backbone.layers[1](x)
         H2, W2 = H1 // 2, W1 // 2
-        skip2 = skip2.view(B, H2, W2, -1).permute(0, 3, 1, 2)
+        skip2 = x.view(B, H2, W2, -1).permute(0, 3, 1, 2)
 
-        skip3 = self.backbone.layers[2](skip2.permute(0, 2, 3, 1))
+        x = self.backbone.layers[2](x)
         H3, W3 = H2 // 2, W2 // 2
-        skip3 = skip3.view(B, H3, W3, -1).permute(0, 3, 1, 2)
+        skip3 = x.view(B, H3, W3, -1).permute(0, 3, 1, 2)
 
-        bottleneck = self.backbone.layers[3](skip3.permute(0, 2, 3, 1))
+        x = self.backbone.layers[3](x)
         H4, W4 = H3 // 2, W3 // 2
-        bottleneck = bottleneck.view(B, H4, W4, -1).permute(0, 3, 1, 2)
+        bottleneck = x.view(B, H4, W4, -1).permute(0, 3, 1, 2)
 
         x = self.proj4(bottleneck)
         skip3 = self.proj3(skip3)
@@ -94,6 +90,4 @@ class SwinUNet(nn.Module):
         x = self.decoder3(x, skip3)
         x = self.decoder2(x, skip2)
         x = self.decoder1(x, skip1)
-
         return self.final(x)
-
