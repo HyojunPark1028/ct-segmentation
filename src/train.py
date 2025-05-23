@@ -68,9 +68,7 @@ class KFoldNpySegDataset(Dataset):
         msk = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
         msk = (msk > 127).astype(np.float32)
         
-        # Ensure image and mask have channel dimension
-        img = img[..., None] if img.ndim == 2 else img
-        msk = msk[..., None] if msk.ndim == 2 else msk
+        img, msk = img[...,None], msk[...,None] # Add channel dimension for Albumentations
 
         out = self.tf(image=img, mask=msk)
         img_t = out['image']                     # C x H x W (already)
@@ -266,8 +264,8 @@ def main(cfg):
                 x, y = x.to(device), y.to(device)
                 
                 # ⭐ 마스크(target) 텐서의 채널 위치를 (N, C, H, W)로 맞춤 (N, H, W, 1) -> (N, 1, H, W)
-                if y.ndim == 4 and y.shape[-1] == 1: 
-                    y = y.permute(0, 3, 1, 2) 
+                # if y.ndim == 4 and y.shape[-1] == 1: 
+                #     y = y.permute(0, 3, 1, 2) 
 
                 #optimizer.zero_grad()
                 preds = model(x) # output 이름은 preds로 통일
