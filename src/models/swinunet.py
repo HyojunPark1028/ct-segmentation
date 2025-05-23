@@ -198,8 +198,12 @@ class SwinUNet(nn.Module):
             # Assuming we want a small spatial size like 7x7
             spatial_size = 7
             x = x.view(B, C, 1, 1).expand(B, C, spatial_size, spatial_size)
-        elif len(x.shape) == 4:  # (B, C, H, W) - already in correct format
-            pass
+        elif len(x.shape) == 4:  # (B, H, W, C) or (B, C, H, W)
+            # Check if it's (B, H, W, C) format (Swin output)
+            if x.shape[-1] > x.shape[1]:  # Last dim is likely channels
+                # Convert from (B, H, W, C) to (B, C, H, W)
+                x = x.permute(0, 3, 1, 2)
+            # If it's already (B, C, H, W), do nothing
         else:
             raise ValueError(f"Unexpected output shape from backbone: {x.shape}")
         
