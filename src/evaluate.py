@@ -11,22 +11,24 @@ def _metric(pred, tgt, thr):
 
     # Handle cases where both masks are empty
     if p.sum() == 0 and tgt.sum() == 0:
-        dice = 1.0
-        iou = 1.0
+        dice_val = 1.0
+        iou_val = 1.0
     else:
         # Avoid division by zero for dice
         dice_denominator = p.sum() + tgt.sum()
-        dice = (2 * inter + 1e-6) / (dice_denominator + 1e-6)
+        # If dice_denominator is 0 here (shouldn't be if not both empty), add epsilon
+        dice_tensor = (2 * inter + 1e-6) / (dice_denominator + 1e-6)
 
         # Avoid division by zero for iou
         iou_denominator = union
-        iou = (inter + 1e-6) / (iou_denominator + 1e-6)
+        # If iou_denominator is 0 here (shouldn't be if not both empty), add epsilon
+        iou_tensor = (inter + 1e-6) / (iou_denominator + 1e-6)
 
-    # Ensure dice and iou are within [0, 1] range in case of numerical instability
-    dice = torch.clamp(dice, 0.0, 1.0).item()
-    iou = torch.clamp(iou, 0.0, 1.0).item()
+        # Ensure dice and iou are within [0, 1] range in case of numerical instability
+        dice_val = torch.clamp(dice_tensor, 0.0, 1.0).item()
+        iou_val = torch.clamp(iou_tensor, 0.0, 1.0).item()
     
-    return dice, iou
+    return dice_val, iou_val
 
 def _vis(img, m, p, thr):
     import numpy as np
