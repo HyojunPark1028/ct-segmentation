@@ -123,27 +123,9 @@ def get_model(cfg, device):
         from .models.sam2unet import SAM2UNet # SAM2UNet은 필요할 때만 임포트
         model = SAM2UNet(checkpoint=cfg.model.checkpoint, config=cfg.model.config)
     elif model_name == 'medsam':
-        # MedSAM은 image_encoder_model_type, image_encoder_ckpt_path 등을 받음
-        # 이전 코드의 MedSAM은 'checkpoint'만 받았지만, 새 get_model은 더 상세한 파라미터를 사용
-        model = MedSAM(
-            image_encoder_model_type=cfg.model.image_encoder_model_type,
-            image_encoder_ckpt_path=cfg.model.image_encoder_ckpt_path,
-            decoder_model_type=cfg.model.decoder_model_type,
-            decoder_ckpt_path=cfg.model.decoder_ckpt_path,
-            in_channels=in_channels, # 이 채널들은 MedSAM 자체의 입력이 아닐 수 있으므로 모델 정의를 확인해야 함
-            out_channels=out_channels # MedSAM은 일반적으로 mask_decoder에서 1채널 마스크를 생성
-        )
+        model = MedSAM(checkpoint=cfg.model.checkpoint)
     elif model_name == 'medsam2':
-        # MedSAM2는 medsam_ckpt_path, prompt_encoder_ckpt_path, mask_decoder_ckpt_path를 받음
-        # 이전 코드의 MedSAM2는 'checkpoint'와 'image_size'를 받았음.
-        # 여기서는 user가 제공한 get_model 시그니처를 따름
-        model = MedSAM2(
-            medsam_ckpt_path=cfg.model.medsam_ckpt_path,
-            prompt_encoder_ckpt_path=cfg.model.prompt_encoder_ckpt_path,
-            mask_decoder_ckpt_path=cfg.model.mask_decoder_ckpt_path,
-            image_size=img_size # MedSAM2는 image_size를 필요로 함
-            # in_channels, out_channels는 MedSAM2 모델 정의에 따라 필요할 수 있음
-        )
+        model = MedSAM2(checkpoint=cfg.model.checkpoint, image_size=cfg.model.img_size)
     else:
         raise ValueError(f"Unknown model: {model_name}")
     return model.to(device)

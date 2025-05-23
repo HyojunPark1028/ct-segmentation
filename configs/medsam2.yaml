@@ -13,6 +13,7 @@ experiment:
 data:
   root_dir: "C:/Users/Hyojun Park/Paper/ct-segmentation/content/data"
   threshold: 0.3
+  normalize_type: sam
 
 train:
   batch_size: 4
