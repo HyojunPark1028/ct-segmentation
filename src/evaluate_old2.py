@@ -1,5 +1,5 @@
 import torch, pandas as pd, matplotlib.pyplot as plt
-# from .models.medsam import MedSAM  # MedSAM 분기 처리를 위해 import
+# from .models.medsam import MedSAM  # MedSAM 분기 처리를 위해 import
 
 def _metric(pred, tgt, thr):
     p=(pred>thr).float(); inter=(p*tgt).sum(); union=p.sum()+tgt.sum()-inter
@@ -25,7 +25,7 @@ def evaluate(model, loader, device, thr=0.5, vis=False):
             p = torch.sigmoid(output)
             di,io=_metric(p,y,thr); d+=di; i+=io
             if vis and k==0: 
-                vis_n = min(10, x.shape[0])  # 안전하게 제한
+                vis_n = min(10, x.shape[0])
                 for j in range(vis_n):
                     _vis(x[j],y[j],p[j], thr)
                     plt.pause(0.1)
@@ -39,12 +39,12 @@ def compute_mask_coverage(model, loader, device, thr=0.5):
     with torch.no_grad():
         for x, y in loader:
             x, y = x.to(device), y.to(device)
-            y = (y > 0.5).float()  # ⭐ 강제 이진화
+            y = (y > 0.5).float()
             output = model(x)
             if isinstance(output, tuple):
-                output = output[0]  # SAM2UNet 등 대응
+                output = output[0]
 
-            pred = torch.sigmoid(output) > thr            
+            pred = torch.sigmoid(output) > thr
             inter = (pred * y).sum()
             gt_total += y.sum()
             pred_total += pred.sum()
@@ -57,4 +57,4 @@ def compute_mask_coverage(model, loader, device, thr=0.5):
         "intersection": int(inter_total),
         "coverage": coverage,
         "overpredict": overpredict
-    }
+          }
