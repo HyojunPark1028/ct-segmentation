@@ -395,10 +395,11 @@ def main(cfg):
             'best_val_dice': best_val_dice, # Early stopping 기준이었던 best_val_dice를 기록
             'best_val_loss': avg_val_loss, # 마지막 에포크의 val_loss 혹은 best_val_loss (초기화 방식에 따라)
             'best_model_val_iou': val_iou_at_best,
-            'val_mask_coverage_gt_total': coverage_stats_val['gt_total'].item() if isinstance(coverage_stats_val['gt_total'], torch.Tensor) else coverage_stats_val['gt_total'],
-            'val_mask_coverage_pred_total': coverage_stats_val['pred_total'].item() if isinstance(coverage_stats_val['pred_total'], torch.Tensor) else coverage_stats_val['pred_total'],
-            'val_mask_coverage_inter_total': coverage_stats_val['inter_total'].item() if isinstance(coverage_stats_val['inter_total'], torch.Tensor) else coverage_stats_val['inter_total'],
-            'val_mask_coverage_ratio': coverage_stats_val['mask_coverage_ratio'],
+            'val_mask_coverage_gt_pixels': coverage_stats_val['gt_pixels'].item() if isinstance(coverage_stats_val['gt_pixels'], torch.Tensor) else coverage_stats_val['gt_pixels'],
+            'val_mask_coverage_pred_pixels': coverage_stats_val['pred_pixels'].item() if isinstance(coverage_stats_val['pred_pixels'], torch.Tensor) else coverage_stats_val['pred_pixels'],
+            'val_mask_coverage_intersection': coverage_stats_val['intersection'].item() if isinstance(coverage_stats_val['intersection'], torch.Tensor) else coverage_stats_val['intersection'],
+            'val_mask_coverage_coverage': coverage_stats_val['coverage'],
+            'val_mask_coverage_overpredict': coverage_stats_val['overpredict'],
             'val_inference_time_per_batch_sec': best_fold_inference_time # ⭐ 해당 폴드 베스트 모델의 인퍼런스 시간
         }
         all_fold_best_metrics.append(fold_best_metrics_entry)
