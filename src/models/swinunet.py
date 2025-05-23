@@ -61,12 +61,17 @@ class SwinUNet(nn.Module):
         # 분류 헤드 제거 (분할 작업에 필요 없음)
         self.backbone.head = nn.Identity()
 
+        # Get expected channel dimensions from the backbone
+        # These are the output channels of each stage of the Swin Transformer
+        # For swin_base_patch4_window7_224, these are typically [128, 256, 512, 1024]
+        self.backbone_out_channels = self.backbone.num_features 
+
         # 인코더에서 추출된 특징의 채널을 디코더에 맞게 조정하는 1x1 Conv2d 계층들
         # 이들은 (B, C, H, W) 형태의 입력을 받습니다.
-        self.proj4 = nn.Conv2d(1024, 384, kernel_size=1) # 병목 특징 투영 (1024ch -> 384ch)
-        self.proj3 = nn.Conv2d(512, 192, kernel_size=1) # 스킵 연결 (Layer 2) 투영 (512ch -> 192ch)
-        self.proj2 = nn.Conv2d(256, 96, kernel_size=1)  # 스킵 연결 (Layer 1) 투영 (256ch -> 96ch)
-        self.proj1 = nn.Conv2d(128, 48, kernel_size=1)  # 스킵 연결 (Layer 0) 투영 (128ch -> 48ch)
+        self.proj4 = nn.Conv2d(self.backbone_out_channels[3], 384, kernel_size=1) # 병목 특징 투영 (1024ch -> 384ch)
+        self.proj3 = nn.Conv2d(self.backbone_out_channels[2], 192, kernel_size=1) # 스킵 연결 (Layer 2) 투영 (512ch -> 192ch)
+        self.proj2 = nn.Conv2d(self.backbone_out_channels[1], 96, kernel_size=1)  # 스킵 연결 (Layer 1) 투영 (256ch -> 96ch)
+        self.proj1 = nn.Conv2d(self.backbone_out_channels[0], 48, kernel_size=1)  # 스킵 연결 (Layer 0) 투영 (128ch -> 48ch)
 
         # 디코더 단계 정의 (사용자께서 제공하신 UpBlock 사용)
         # UpBlock(in_channels, skip_channels, out_channels)
@@ -97,19 +102,19 @@ class SwinUNet(nn.Module):
         # img_size = 224, patch_size = 4
         # Stage 1 (skip1): H/4, W/4 = 56x56
         H_s1, W_s1 = self.img_size // 4, self.img_size // 4
-        skip1 = features[0].view(x.size(0), H_s1, W_s1, -1).permute(0, 3, 1, 2).contiguous() # (B, 128, H/4, W/4)
+        skip1 = features[0].view(x.size(0), H_s1, W_s1, self.backbone_out_channels[0]).permute(0, 3, 1, 2).contiguous() # (B, 128, H/4, W/4)
 
         # Stage 2 (skip2): H/8, W/8 = 28x28
         H_s2, W_s2 = self.img_size // 8, self.img_size // 8
-        skip2 = features[1].view(x.size(0), H_s2, W_s2, -1).permute(0, 3, 1, 2).contiguous() # (B, 256, H/8, W/8)
+        skip2 = features[1].view(x.size(0), H_s2, W_s2, self.backbone_out_channels[1]).permute(0, 3, 1, 2).contiguous() # (B, 256, H/8, W/8)
 
         # Stage 3 (skip3): H/16, W/16 = 14x14
         H_s3, W_s3 = self.img_size // 16, self.img_size // 16
-        skip3 = features[2].view(x.size(0), H_s3, W_s3, -1).permute(0, 3, 1, 2).contiguous() # (B, 512, H/16, W/16)
+        skip3 = features[2].view(x.size(0), H_s3, W_s3, self.backbone_out_channels[2]).permute(0, 3, 1, 2).contiguous() # (B, 512, H/16, W/16)
 
         # Stage 4 (bottleneck): H/32, W/32 = 7x7
         H_s4, W_s4 = self.img_size // 32, self.img_size // 32
-        bottleneck = features[3].view(x.size(0), H_s4, W_s4, -1).permute(0, 3, 1, 2).contiguous() # (B, 1024, H/32, W/32)
+        bottleneck = features[3].view(x.size(0), H_s4, W_s4, self.backbone_out_channels[3]).permute(0, 3, 1, 2).contiguous() # (B, 1024, H/32, W/32)
 
         # proj 계층 (nn.Conv2d)을 통해 채널 수 조정
         proj_bottleneck = self.proj4(bottleneck)
