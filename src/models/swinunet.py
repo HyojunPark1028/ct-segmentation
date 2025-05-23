@@ -4,23 +4,29 @@ import torch.nn.functional as F # F.interpolate 사용을 위해 임포트
 from timm.models.swin_transformer import swin_base_patch4_window7_224
 
 class PatchExpanding(nn.Module):
-        def __init__(self, input_dim):
-            super().__init__()
-            # input_dim -> input_dim // 2 로 줄이면서 해상도 2배 확대
-            self.proj = nn.Conv2d(input_dim, input_dim * 4, kernel_size=1)
-            self.pixel_shuffle = nn.PixelShuffle(2)
-            self.norm = nn.LayerNorm(input_dim // 2) # PixelShuffle 후 채널
-            self.output_dim = input_dim // 2
+    def __init__(self, input_dim):
+        super().__init__()
+        # input_dim -> input_dim * 4 로 채널을 늘리고 PixelShuffle로 2배 해상도 확장 (채널은 input_dim // 4 로 줄어듦)
+        # PixelShuffle의 출력 채널은 input_dim // 4 가 됩니다.
+        self.proj = nn.Conv2d(input_dim, input_dim * 4, kernel_size=1)
+        self.pixel_shuffle = nn.PixelShuffle(2)
+        # PixelShuffle 후의 채널 수는 input_dim * 4 / (2*2) = input_dim 이 됩니다.
+        # 따라서 LayerNorm은 이 output_dim에 맞춰야 합니다.
+        self.output_dim = input_dim # PixelShuffle 후 채널
+        self.norm = nn.LayerNorm(self.output_dim)
 
-        def forward(self, x):
-            # x: (B, C, H, W)
-            x = self.proj(x) # (B, C*4, H, W)
-            x = self.pixel_shuffle(x) # (B, C, H*2, W*2)
-            # LayerNorm은 (B, C, H, W) -> (B, H, W, C) 로 변경 후 적용
-            x = x.permute(0, 2, 3, 1).contiguous()
-            x = self.norm(x) # <--- 이 부분에서 문제 발생
-            x = x.permute(0, 3, 1, 2).contiguous()
-            return x
+
+    def forward(self, x):
+        # x: (B, C, H, W)
+        x = self.proj(x)  # (B, input_dim * 4, H, W)
+        x = self.pixel_shuffle(x)  # (B, input_dim, H*2, W*2)
+
+        # LayerNorm은 (B, H, W, C) 형태에서 마지막 C 차원에 적용되므로 permute 필요
+        x = x.permute(0, 2, 3, 1).contiguous() # (B, H*2, W*2, input_dim)
+        x = self.norm(x)
+        x = x.permute(0, 3, 1, 2).contiguous() # 다시 (B, input_dim, H*2, W*2)
+        return x
+
 
 class SwinDecoderBlock(nn.Module):
     def __init__(self, in_dim, skip_dim, out_dim):
