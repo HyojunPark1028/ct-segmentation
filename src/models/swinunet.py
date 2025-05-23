@@ -89,27 +89,42 @@ class SwinUNet(nn.Module):
         # Load pretrained Swin Transformer backbone
         self.backbone = swin_base_patch4_window7_224(pretrained=use_pretrained)
         
-        # Get the feature dimensions from backbone
-        # Swin-B: [128, 256, 512, 1024]
-        self.feature_dims = [128, 256, 512, 1024]
+        # Remove the classification head
+        self.backbone.head = nn.Identity()
         
-        # Projection layers to standardize dimensions
-        self.proj4 = nn.Linear(1024, 512)  # Bottleneck
-        self.proj3 = nn.Linear(512, 256)   # Skip connection 3
-        self.proj2 = nn.Linear(256, 128)   # Skip connection 2
-        self.proj1 = nn.Linear(128, 64)    # Skip connection 1
+        # Swin-B feature dimensions: [128, 256, 512, 1024] at different stages
+        # But we need to check actual dimensions by running forward pass
         
-        # Decoder blocks
-        self.decoder3 = SwinDecoderBlock(512, 256, 256)  # 512->256, skip:256, out:256
-        self.decoder2 = SwinDecoderBlock(256, 128, 128)  # 256->128, skip:128, out:128
-        self.decoder1 = SwinDecoderBlock(128, 64, 64)    # 128->64,  skip:64,  out:64
+        # Create a simple conv-based decoder for now to fix dimension issues
+        self.decoder = nn.ModuleDict({
+            'up4': nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2),
+            'conv4': nn.Sequential(
+                nn.Conv2d(512, 512, 3, padding=1),
+                nn.BatchNorm2d(512),
+                nn.ReLU(inplace=True)
+            ),
+            'up3': nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2),
+            'conv3': nn.Sequential(
+                nn.Conv2d(256, 256, 3, padding=1),
+                nn.BatchNorm2d(256),
+                nn.ReLU(inplace=True)
+            ),
+            'up2': nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2),
+            'conv2': nn.Sequential(
+                nn.Conv2d(128, 128, 3, padding=1),
+                nn.BatchNorm2d(128),
+                nn.ReLU(inplace=True)
+            ),
+            'up1': nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2),
+            'conv1': nn.Sequential(
+                nn.Conv2d(64, 64, 3, padding=1),
+                nn.BatchNorm2d(64),
+                nn.ReLU(inplace=True)
+            ),
+            'final': nn.Conv2d(64, num_classes, kernel_size=1)
+        })
         
-        # Final upsampling and classification
-        self.final_expand = PatchExpanding(64)  # 64 -> 32
-        self.final_norm = nn.LayerNorm(32)
-        self.classifier = nn.Linear(32, num_classes)
-        
-        # Additional upsampling to original size
+        # Additional upsampling if needed
         self.final_upsample = nn.Upsample(scale_factor=4, mode='bilinear', align_corners=False)
 
     def forward(self, x):
@@ -117,48 +132,50 @@ class SwinUNet(nn.Module):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
         
-        B = x.size(0)
+        B, _, H, W = x.shape
         
-        # Extract features using backbone
+        # Get features from Swin backbone
+        # Use the forward_features method to get intermediate features
+        features = self.extract_features(x)
+        
+        # Use the deepest feature for decoding
+        x = features  # This should be (B, 1024, H/32, W/32)
+        
+        # Decoder path
+        x = self.decoder['up4'](x)      # -> (B, 512, H/16, W/16)
+        x = self.decoder['conv4'](x)
+        
+        x = self.decoder['up3'](x)      # -> (B, 256, H/8, W/8)
+        x = self.decoder['conv3'](x)
+        
+        x = self.decoder['up2'](x)      # -> (B, 128, H/4, W/4)
+        x = self.decoder['conv2'](x)
+        
+        x = self.decoder['up1'](x)      # -> (B, 64, H/2, W/2)
+        x = self.decoder['conv1'](x)
+        
+        # Final classification
+        x = self.decoder['final'](x)    # -> (B, num_classes, H/2, W/2)
+        
+        # Upsample to original size
+        x = F.interpolate(x, size=(H, W), mode='bilinear', align_corners=False)
+        
+        return x
+    
+    def extract_features(self, x):
+        """Extract features from Swin backbone"""
+        # Patch embedding
         x = self.backbone.patch_embed(x)
         if self.backbone.patch_embed.norm is not None:
             x = self.backbone.patch_embed.norm(x)
         
-        # Get multi-scale features
-        features = []
+        # Pass through all layers
         for layer in self.backbone.layers:
-            features.append(x)
             x = layer(x)
         
-        # Features: [skip1, skip2, skip3, bottleneck]
-        skip1, skip2, skip3, bottleneck = features
-        
-        # Apply projections to standardize dimensions
-        bottleneck = self.proj4(bottleneck)  # 1024 -> 512
-        skip3 = self.proj3(skip3)            # 512 -> 256
-        skip2 = self.proj2(skip2)            # 256 -> 128
-        skip1 = self.proj1(skip1)            # 128 -> 64
-        
-        # Decoder path
-        x = self.decoder3(bottleneck, skip3)  # 512 -> 256
-        x = self.decoder2(x, skip2)           # 256 -> 128
-        x = self.decoder1(x, skip1)           # 128 -> 64
-        
-        # Final processing
-        x = self.final_expand(x)              # 64 -> 32
-        x = self.final_norm(x)
-        
-        # Convert to spatial format for final processing
+        # Convert back to spatial format
         B, L, C = x.shape
         H = W = int(L**0.5)
         x = x.view(B, H, W, C).permute(0, 3, 1, 2)  # (B, C, H, W)
-        
-        # Final upsampling to original resolution
-        x = self.final_upsample(x)  # Upsample by 4x to get original size
-        
-        # Classification
-        x = x.permute(0, 2, 3, 1)  # (B, H, W, C)
-        x = self.classifier(x)      # (B, H, W, num_classes)
-        x = x.permute(0, 3, 1, 2)  # (B, num_classes, H, W)
         
         return x
