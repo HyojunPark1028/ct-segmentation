@@ -43,7 +43,7 @@ class SwinDecoderBlock(nn.Module):
 class SwinUNet(nn.Module):
     def __init__(self, img_size=224, num_classes=1, use_pretrained=True):
         super().__init__()
-        self.backbone = swin_base_patch4_window7_224(pretrained=use_pretrained, features_only=True)
+        self.backbone = swin_base_patch4_window7_224(pretrained=use_pretrained)
         self.proj4 = nn.Conv2d(1024, 384, kernel_size=1)
         self.proj3 = nn.Conv2d(512, 192, kernel_size=1)
         self.proj2 = nn.Conv2d(256, 96, kernel_size=1)
