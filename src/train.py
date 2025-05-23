@@ -306,6 +306,7 @@ def main(cfg):
             model.eval()
             val_loss = 0
             val_inference_times = [] # ⭐ 배치당 인퍼런스 시간 측정
+            val_start = time.time()
             with torch.no_grad():
                 for x_val, y_val in val_dl:
                     x_val, y_val = x_val.to(device), y_val.to(device)
