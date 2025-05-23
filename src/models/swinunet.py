@@ -165,25 +165,25 @@ class SwinUNet(nn.Module):
     def extract_features(self, x):
         """Extract features from Swin backbone"""
         # Debug: Print input shape
-        print(f"Input shape: {x.shape}")
+        # print(f"Input shape: {x.shape}")
         
         # Patch embedding
         x = self.backbone.patch_embed(x)
-        print(f"After patch_embed: {x.shape}")
+        # print(f"After patch_embed: {x.shape}")
         
         if self.backbone.patch_embed.norm is not None:
             x = self.backbone.patch_embed.norm(x)
-            print(f"After patch_embed norm: {x.shape}")
+            # print(f"After patch_embed norm: {x.shape}")
         
         # Pass through all layers
         for i, layer in enumerate(self.backbone.layers):
             x = layer(x)
-            print(f"After layer {i}: {x.shape}")
+            # print(f"After layer {i}: {x.shape}")
         
         # Check if we have the norm layer
         if hasattr(self.backbone, 'norm') and self.backbone.norm is not None:
             x = self.backbone.norm(x)
-            print(f"After final norm: {x.shape}")
+            # print(f"After final norm: {x.shape}")
         
         # Handle different output shapes
         if len(x.shape) == 3:  # (B, L, C)
@@ -207,5 +207,5 @@ class SwinUNet(nn.Module):
         else:
             raise ValueError(f"Unexpected output shape from backbone: {x.shape}")
         
-        print(f"Final output shape: {x.shape}")
+        # print(f"Final output shape: {x.shape}")
         return x
