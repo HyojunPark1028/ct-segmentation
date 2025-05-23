@@ -8,7 +8,7 @@ class DiceLoss(nn.Module):
         inter=(p*t).sum(); return 1- (2*inter+self.smooth)/(p.sum()+t.sum()+self.smooth)
 
 class FocalLoss(nn.Module):
-    def __init__(self, alpha=0.6, gamma=1.0):
+    def __init__(self, alpha=0.8, gamma=2.0):
         super().__init__(); self.a,self.g=alpha,gamma; self.bce=nn.BCEWithLogitsLoss(reduction='none')
     def forward(self,p,t):
         b=self.bce(p,t); pt=torch.exp(-b); return (self.a*(1-pt)**self.g*b).mean()
