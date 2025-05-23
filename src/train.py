@@ -73,7 +73,15 @@ class KFoldNpySegDataset(Dataset):
         msk = msk[..., None] if msk.ndim == 2 else msk
 
         out = self.tf(image=img, mask=msk)
-        return out['image'], out['mask']
+        img_t = out['image']                     # C x H x W (already)
+        msk_t = out['mask']                     # H x W  or 1 x H x W depending on Albumentations
+
+        if msk_t.ndim == 3 and msk_t.shape[0] != 1:  # H x W x 1  →  1 x H x W
+            msk_t = msk_t.permute(2, 0, 1)
+        elif msk_t.ndim == 2:                       # H x W  →  1 x H x W
+            msk_t = msk_t.unsqueeze(0)
+
+        return img_t.float(), msk_t.float()
 
 
 # 기존 import를 유지하되 KFoldNpySegDataset을 사용
@@ -261,7 +269,7 @@ def main(cfg):
                 if y.ndim == 4 and y.shape[-1] == 1: 
                     y = y.permute(0, 3, 1, 2) 
 
-                optimizer.zero_grad()
+                #optimizer.zero_grad()
                 preds = model(x) # output 이름은 preds로 통일
 
                 # ⭐ Deep Supervision Loss 처리
@@ -271,13 +279,9 @@ def main(cfg):
                     for i, p in enumerate(pred_deep):
                         try:
                             h, w = y.shape[2], y.shape[3]
-                            # Rescale deep features to target size for loss calculation
-                            if p.shape[2:] != y.shape[2:]: # Only resize if necessary
-                                p = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
-                            # Ensure deep prediction has 1 channel if it's not already
-                            if p.shape[1] != 1:
-                                p = nn.Conv2d(p.shape[1], 1, kernel_size=1).to(p.device)(p)
-                            loss += 0.02 * criterion(p, y)
+                            p = nn.Conv2d(p.shape[1], 1, kernel_size=1).to(p.device)(p)
+                            p_up = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
+                            loss += 0.02 * criterion(p_up, y)
                         except Exception as e:
                             print(f"[ERROR] in deep supervision loss for p[{i}]: {e}")
                             # raise # 에러 발생 시 훈련 중단 대신 메시지 출력 후 계속 진행 (또는 필요시 중단)
@@ -286,7 +290,7 @@ def main(cfg):
                 else: # 단일 출력 모델
                     loss = criterion(preds, y)
                 
-                loss.backward()
+                optimizer.zero_grad(); loss.backward()
                 # ⭐ Gradient Clipping 적용
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
@@ -312,8 +316,8 @@ def main(cfg):
                     x_val, y_val = x_val.to(device), y_val.to(device)
                     
                     # ⭐ 마스크(target) 텐서의 채널 위치를 (N, C, H, W)로 맞춤
-                    if y_val.ndim == 4 and y_val.shape[-1] == 1: 
-                        y_val = y_val.permute(0, 3, 1, 2) 
+                    # if y_val.ndim == 4 and y_val.shape[-1] == 1: 
+                    #     y_val = y_val.permute(0, 3, 1, 2) 
 
                     torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
                     start_inference = time.time()
@@ -484,14 +488,15 @@ def main(cfg):
         )
         ts_dl = DataLoader(test_ds, batch_size=cfg.train.batch_size, shuffle=False, num_workers=cfg.train.num_workers)
 
+        criterion = get_loss() 
         test_loss_sum = 0
         test_inference_times = []
         with torch.no_grad():
             for x_test, y_test in tqdm(ts_dl, desc="Evaluating Test Set"):
                 x_test, y_test = x_test.to(device), y_test.to(device)
                 
-                if y_test.ndim == 4 and y_test.shape[-1] == 1: 
-                    y_test = y_test.permute(0, 3, 1, 2) 
+                # if y_test.ndim == 4 and y_test.shape[-1] == 1: 
+                #     y_test = y_test.permute(0, 3, 1, 2) 
 
                 torch.cuda.synchronize()
                 start_inference = time.time()
@@ -525,10 +530,10 @@ def main(cfg):
             "test_loss": round(avg_test_loss, 4),
             "test_inference_time_per_batch_sec": round(avg_test_inference_time_per_batch, 6),
             "param_count": total_trainable_parameters, # K-Fold에서 계산된 총 파라미터 수
-            "gt_total": coverage_stats['gt_total'].item() if isinstance(coverage_stats['gt_total'], torch.Tensor) else coverage_stats['gt_total'],
-            "pred_total": coverage_stats['pred_total'].item() if isinstance(coverage_stats['pred_total'], torch.Tensor) else coverage_stats['pred_total'],
-            "inter_total": coverage_stats['inter_total'].item() if isinstance(coverage_stats['inter_total'], torch.Tensor) else coverage_stats['inter_total'],
-            "mask_coverage_ratio": coverage_stats['mask_coverage_ratio']
+            "gt_total": coverage_stats['gt_pixels'].item() if isinstance(coverage_stats['gt_pixels'], torch.Tensor) else coverage_stats['gt_pixels'],
+            "pred_total": coverage_stats['pred_pixels'].item() if isinstance(coverage_stats['pred_pixels'], torch.Tensor) else coverage_stats['pred_pixels'],
+            "inter_total": coverage_stats['intersection'].item() if isinstance(coverage_stats['intersection'], torch.Tensor) else coverage_stats['intersection'],
+            "mask_coverage_ratio": coverage_stats['coverage']
         }
         pd.DataFrame([test_result]).to_csv(os.path.join(output_dir, "final_test_result.csv"), index=False)
         print(f"Final test results saved to: {os.path.join(output_dir, 'final_test_result.csv')}")
