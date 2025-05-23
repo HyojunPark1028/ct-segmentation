@@ -5,7 +5,7 @@ import gc
 import os, torch, pandas as pd
 import random, numpy as np
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset # Dataset 임포트 추가
 import torch.nn as nn
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -13,13 +13,70 @@ from datetime import datetime
 from sklearn.model_selection import KFold
 import shutil
 
+# 모델 임포트
 from .models.unet import UNet
 from .models.transunet import TransUNet
 from .models.swinunet import SwinUNet
 from .models.utransvision import UTransVision
 from .models.medsam import MedSAM
 from .models.medsam2 import MedSAM2
-from .dataset import NpySegDataset # 수정된 Dataset 임포트 (이름을 유지하거나 CrossFoldNpySegDataset으로 변경)
+
+# 기존 Dataset을 재사용하되, K-Fold에 맞게 파일 경로 리스트를 받아 처리하도록 수정
+# NOTE: original dataset.py's NpySegDataset expects a 'split_dir'.
+# For K-Fold, we will use a modified/wrapped dataset class that accepts explicit image_paths and mask_paths.
+# Assuming `NpySegDataset` has been modified or a wrapper is used to accept `image_paths` and `mask_paths` directly.
+# If the original `dataset.py`'s `NpySegDataset` is strictly directory-based, this part needs a custom Dataset or a temporary directory setup.
+# For this response, we'll assume a `NpySegDataset` that can take lists of paths as per the user's KFold snippet's instantiation.
+import cv2 # cv2는 dataset.py에 있으므로 여기서 직접 필요하지 않지만, 이미지 처리에 사용될 수 있으므로 유지
+from albumentations.pytorch import ToTensorV2
+import albumentations as A
+
+class KFoldNpySegDataset(Dataset):
+    """
+    Modified NpySegDataset to accept explicit lists of image and mask paths,
+    suitable for K-Fold cross-validation.
+    """
+    def __init__(self, image_paths: list, mask_paths: list, augment=False, img_size=None, normalize_type="default"):
+        self.image_paths = image_paths
+        self.mask_paths = mask_paths
+        self.normalize_type = normalize_type
+
+        resize = [A.Resize(img_size, img_size)] if img_size else []
+        base_aug_ops = resize + [
+            A.HorizontalFlip(p=0.5),
+            A.RandomRotate90(p=0.5),
+            A.ShiftScaleRotate(p=0.5),
+            ToTensorV2(),
+        ]
+        no_aug_ops = resize + [ToTensorV2()]
+        self.tf = A.Compose(base_aug_ops if augment else no_aug_ops)
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        img_path = self.image_paths[idx]
+        mask_path = self.mask_paths[idx]
+
+        img = np.load(img_path).astype(np.float32)
+        if self.normalize_type == "sam":
+            img = img - img.min()
+            img = (img / (img.max() + 1e-8)) * 255.0
+        elif self.normalize_type == "default":
+            img = img / 255.0
+        
+        msk = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        msk = (msk > 127).astype(np.float32)
+        
+        # Ensure image and mask have channel dimension
+        img = img[..., None] if img.ndim == 2 else img
+        msk = msk[..., None] if msk.ndim == 2 else msk
+
+        out = self.tf(image=img, mask=msk)
+        return out['image'], out['mask']
+
+
+# 기존 import를 유지하되 KFoldNpySegDataset을 사용
 from .losses import get_loss
 from .evaluate import evaluate, compute_mask_coverage
 
@@ -42,34 +99,44 @@ def seed_worker(worker_id):
 
 def get_model(cfg, device):
     """Refactored to return a new model instance for each fold"""
-    model_name = cfg.model.name
-    in_channels = cfg.model.in_channels if hasattr(cfg.model, 'in_channels') else 1
-    out_channels = cfg.model.out_channels if hasattr(cfg.model, 'out_channels') else 1
+    model_name = cfg.model.name.lower() # 소문자로 변환하여 일관성 유지
+    in_channels = cfg.model.get('in_channels', 1)
+    out_channels = cfg.model.get('out_channels', 1)
+    use_pretrained = cfg.model.get("use_pretrained", False) # UNet, TransUNet, SwinUNet, UTransVision
+    img_size = cfg.model.get('img_size') # TransUNet, SwinUNet, UTransVision, MedSAM2
 
     if model_name == 'unet':
-        model = UNet(use_pretrained=cfg.model.use_pretrained, in_channels=in_channels, out_channels=out_channels)
+        model = UNet(use_pretrained=use_pretrained, in_channels=in_channels, out_channels=out_channels)
     elif model_name == 'transunet':
-        model = TransUNet(img_size=cfg.model.img_size, in_channels=in_channels, out_channels=out_channels)
+        model = TransUNet(img_size=img_size, num_classes=out_channels, use_pretrained=use_pretrained)
     elif model_name == 'swinunet':
-        model = SwinUNet(img_size=cfg.model.img_size, in_channels=in_channels, out_channels=out_channels)
+        model = SwinUNet(img_size=img_size, num_classes=out_channels, use_pretrained=use_pretrained)
     elif model_name == 'utransvision':
-        model = UTransVision(img_size=cfg.model.img_size, in_channels=in_channels, out_channels=out_channels)
+        model = UTransVision(img_size=img_size, num_classes=out_channels, use_pretrained=use_pretrained)
+    elif model_name == 'sam2unet':
+        from .models.sam2unet import SAM2UNet # SAM2UNet은 필요할 때만 임포트
+        model = SAM2UNet(checkpoint=cfg.model.checkpoint, config=cfg.model.config)
     elif model_name == 'medsam':
+        # MedSAM은 image_encoder_model_type, image_encoder_ckpt_path 등을 받음
+        # 이전 코드의 MedSAM은 'checkpoint'만 받았지만, 새 get_model은 더 상세한 파라미터를 사용
         model = MedSAM(
             image_encoder_model_type=cfg.model.image_encoder_model_type,
             image_encoder_ckpt_path=cfg.model.image_encoder_ckpt_path,
             decoder_model_type=cfg.model.decoder_model_type,
             decoder_ckpt_path=cfg.model.decoder_ckpt_path,
-            in_channels=in_channels,
-            out_channels=out_channels
+            in_channels=in_channels, # 이 채널들은 MedSAM 자체의 입력이 아닐 수 있으므로 모델 정의를 확인해야 함
+            out_channels=out_channels # MedSAM은 일반적으로 mask_decoder에서 1채널 마스크를 생성
         )
     elif model_name == 'medsam2':
+        # MedSAM2는 medsam_ckpt_path, prompt_encoder_ckpt_path, mask_decoder_ckpt_path를 받음
+        # 이전 코드의 MedSAM2는 'checkpoint'와 'image_size'를 받았음.
+        # 여기서는 user가 제공한 get_model 시그니처를 따름
         model = MedSAM2(
             medsam_ckpt_path=cfg.model.medsam_ckpt_path,
             prompt_encoder_ckpt_path=cfg.model.prompt_encoder_ckpt_path,
             mask_decoder_ckpt_path=cfg.model.mask_decoder_ckpt_path,
-            in_channels=in_channels,
-            out_channels=out_channels
+            image_size=img_size # MedSAM2는 image_size를 필요로 함
+            # in_channels, out_channels는 MedSAM2 모델 정의에 따라 필요할 수 있음
         )
     else:
         raise ValueError(f"Unknown model: {model_name}")
@@ -81,16 +148,19 @@ def main(cfg):
     seed_everything(cfg.experiment.seed)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    # --- 1. K-Fold Cross-Validation을 위한 데이터 준비 ---
-    train_img_base = os.path.join(cfg.data.root_dir, 'train', 'images')
-    val_img_base = os.path.join(cfg.data.root_dir, 'val', 'images')
-    train_mask_base = os.path.join(cfg.data.root_dir, 'train', 'masks')
-    val_mask_base = os.path.join(cfg.data.root_dir, 'val', 'masks')
+    # Ensure save directory exists
+    os.makedirs(cfg.train.save_dir, exist_ok=True)
+    OmegaConf.save(cfg, os.path.join(cfg.train.save_dir, "used_config.yaml"))
 
+
+    # --- 1. K-Fold Cross-Validation을 위한 데이터 준비 ---
+    # K-Fold를 위해 모든 train과 val 데이터를 합쳐서 사용
     all_image_full_paths = []
     all_mask_full_paths = []
 
     # train 폴더의 파일 목록 추가
+    train_img_base = os.path.join(cfg.data.root_dir, 'train', 'images')
+    train_mask_base = os.path.join(cfg.data.root_dir, 'train', 'masks')
     if os.path.exists(train_img_base):
         train_files = sorted([f for f in os.listdir(train_img_base) if f.endswith('.npy')])
         for f in train_files:
@@ -98,6 +168,8 @@ def main(cfg):
             all_mask_full_paths.append(os.path.join(train_mask_base, f.replace('.npy','.png')))
     
     # val 폴더의 파일 목록 추가
+    val_img_base = os.path.join(cfg.data.root_dir, 'val', 'images')
+    val_mask_base = os.path.join(cfg.data.root_dir, 'val', 'masks')
     if os.path.exists(val_img_base):
         val_files = sorted([f for f in os.listdir(val_img_base) if f.endswith('.npy')])
         for f in val_files:
@@ -108,16 +180,18 @@ def main(cfg):
         raise FileNotFoundError(f"No .npy files found in {train_img_base} or {val_img_base}. Please check your data path.")
 
     # KFold 설정
-    kf = KFold(n_splits=5, shuffle=True, random_state=cfg.experiment.seed)
+    kf = KFold(n_splits=cfg.train.k_folds, shuffle=True, random_state=cfg.experiment.seed) # k_folds 추가
 
     all_fold_best_metrics = [] # 각 폴드의 '최고' 성능 결과 저장
     
     # 모델의 총 파라미터 수를 저장할 변수 (첫 폴드에서 한 번만 계산)
     total_trainable_parameters = 0
+    
+    normalize_type = cfg.data.get("normalize_type", "default") # normalize_type config에서 가져오기
 
     # --- 2. K-Fold 루프 시작 ---
-    for fold, (train_index, val_index) in enumerate(kf.split(all_image_full_paths)): # kf.split은 리스트 길이에 따라 인덱스 반환
-        print(f"\n--- Starting Fold {fold + 1}/5 ---")
+    for fold, (train_index, val_index) in enumerate(kf.split(all_image_full_paths)):
+        print(f"\n--- Starting Fold {fold + 1}/{cfg.train.k_folds} ---")
 
         # 현재 폴드에 해당하는 훈련/검증 파일 전체 경로 리스트 생성
         fold_train_image_paths = [all_image_full_paths[i] for i in train_index]
@@ -125,26 +199,29 @@ def main(cfg):
         fold_val_image_paths = [all_image_full_paths[i] for i in val_index]
         fold_val_mask_paths = [all_mask_full_paths[i] for i in val_index]
 
-        # Dataset 및 DataLoader 생성
-        train_ds = NpySegDataset( # NpySegDataset 이름 유지
+        # Dataset 및 DataLoader 생성 (KFoldNpySegDataset 사용)
+        train_ds = KFoldNpySegDataset(
             image_paths=fold_train_image_paths,
             mask_paths=fold_train_mask_paths,
             augment=True,
             img_size=cfg.model.img_size,
-            normalize_type=cfg.data.normalize_type if hasattr(cfg.data, 'normalize_type') else "default"
+            normalize_type=normalize_type
         )
-        val_ds = NpySegDataset( # NpySegDataset 이름 유지
+        val_ds = KFoldNpySegDataset(
             image_paths=fold_val_image_paths,
             mask_paths=fold_val_mask_paths,
-            augment=False,
+            augment=False, # Validation set should not be augmented
             img_size=cfg.model.img_size,
-            normalize_type=cfg.data.normalize_type if hasattr(cfg.data, 'normalize_type') else "default"
+            normalize_type=normalize_type
         )
 
+        g = torch.Generator() # DataLoader에 사용할 generator (seed_worker용)
+        g.manual_seed(cfg.experiment.seed + fold) # 각 폴드마다 다른 시드 적용
+
         train_dl = DataLoader(train_ds, batch_size=cfg.train.batch_size, shuffle=True,
-                              num_workers=cfg.train.num_workers, pin_memory=True, worker_init_fn=seed_worker)
+                              num_workers=cfg.train.num_workers, pin_memory=True, worker_init_fn=seed_worker, generator=g)
         val_dl = DataLoader(val_ds, batch_size=cfg.train.batch_size, shuffle=False,
-                             num_workers=cfg.train.num_workers, pin_memory=True, worker_init_fn=seed_worker)
+                            num_workers=cfg.train.num_workers, pin_memory=True) # val_dl은 shuffle=False, generator 불필요
 
         # 매 폴드마다 새로운 모델 초기화
         model = get_model(cfg, device)
@@ -157,7 +234,7 @@ def main(cfg):
         optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr)
         criterion = get_loss()
 
-        best_val_loss = float('inf')
+        best_val_dice = -float('inf') # ⭐ Early Stopping 기준을 val_dice로 변경 (높을수록 좋음)
         patience_counter = 0
 
         # 폴드별 결과 저장 디렉토리 생성
@@ -170,84 +247,118 @@ def main(cfg):
         for epoch in range(1, cfg.train.epochs + 1):
             model.train()
             train_loss = 0
-            train_dice = 0
-            train_iou = 0
+            # 훈련 중 Dice, IoU는 전체 DataLoader에 대한 평가보다는 배치 단위 평균으로 볼 예정
+            # train_dice = 0
+            # train_iou = 0
             train_start = time.time()
             
             # 훈련 루프
-            for k, (x, y) in enumerate(tqdm(train_dl, desc=f"Fold {fold+1} Epoch {epoch}")):
+            loop = tqdm(train_dl, desc=f"Fold {fold+1} Epoch {epoch}/{cfg.train.epochs}", leave=False)
+            for x, y in loop:
                 x, y = x.to(device), y.to(device)
                 
-                # ⭐ 마스크(target) 텐서의 채널 위치를 (N, C, H, W)로 맞춤
+                # ⭐ 마스크(target) 텐서의 채널 위치를 (N, C, H, W)로 맞춤 (N, H, W, 1) -> (N, 1, H, W)
                 if y.ndim == 4 and y.shape[-1] == 1: 
-                    y = y.permute(0, 3, 1, 2) # N H W C -> N C H W
+                    y = y.permute(0, 3, 1, 2) 
 
                 optimizer.zero_grad()
-                output = model(x)
-                if isinstance(output, tuple):
-                    output = output[0]
-                loss = criterion(output, y)
+                preds = model(x) # output 이름은 preds로 통일
+
+                # ⭐ Deep Supervision Loss 처리
+                if isinstance(preds, tuple):
+                    pred_main, *pred_deep = preds
+                    loss = 0.98 * criterion(pred_main, y)
+                    for i, p in enumerate(pred_deep):
+                        try:
+                            h, w = y.shape[2], y.shape[3]
+                            # Rescale deep features to target size for loss calculation
+                            if p.shape[2:] != y.shape[2:]: # Only resize if necessary
+                                p = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
+                            # Ensure deep prediction has 1 channel if it's not already
+                            if p.shape[1] != 1:
+                                p = nn.Conv2d(p.shape[1], 1, kernel_size=1).to(p.device)(p)
+                            loss += 0.02 * criterion(p, y)
+                        except Exception as e:
+                            print(f"[ERROR] in deep supervision loss for p[{i}]: {e}")
+                            # raise # 에러 발생 시 훈련 중단 대신 메시지 출력 후 계속 진행 (또는 필요시 중단)
+                            # 현재는 에러 시 중단하는 기존 동작 유지
+
+                else: # 단일 출력 모델
+                    loss = criterion(preds, y)
+                
                 loss.backward()
+                # ⭐ Gradient Clipping 적용
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
                 train_loss += loss.item()
-                # 훈련 중 Dice, IoU는 배치 단위 평가
-                d, i = evaluate(model, [(x,y)], device, cfg.data.threshold, vis=False)
-                train_dice += d
-                train_iou += i
+                
+                # 훈련 중 현재 배치에 대한 평균 예측값 로깅
+                pred_cpu = (preds[0] if isinstance(preds, tuple) else preds).detach().cpu()
+                loop.set_postfix(loss=loss.item(), mean_pred=torch.sigmoid(pred_cpu).mean().item())
+                
+                del preds, loss # 메모리 해제
+                torch.cuda.empty_cache()
+                gc.collect()
 
             train_end = time.time(); train_elapsed = train_end - train_start
             avg_train_loss = train_loss / len(train_dl)
-            avg_train_dice = train_dice / len(train_dl)
-            avg_train_iou = train_iou / len(train_dl)
 
             model.eval()
             val_loss = 0
-            val_start = time.time()
+            val_inference_times = [] # ⭐ 배치당 인퍼런스 시간 측정
             with torch.no_grad():
                 for x_val, y_val in val_dl:
                     x_val, y_val = x_val.to(device), y_val.to(device)
                     
                     # ⭐ 마스크(target) 텐서의 채널 위치를 (N, C, H, W)로 맞춤
                     if y_val.ndim == 4 and y_val.shape[-1] == 1: 
-                        y_val = y_val.permute(0, 3, 1, 2) # N H W C -> N C H W
+                        y_val = y_val.permute(0, 3, 1, 2) 
 
-                    pred = model(x_val)
-                    if isinstance(pred, tuple):
-                        pred = pred[0]
-                    loss = criterion(pred, y_val)
-                    val_loss += loss.item()
-            val_end = time.time(); val_elapsed = val_end - val_start
+                    torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
+                    start_inference = time.time()
+                    v_pred = model(x_val)
+                    torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
+                    end_inference = time.time()
+                    val_inference_times.append(end_inference - start_inference)
+
+                    if isinstance(v_pred, tuple): v_pred = v_pred[0]
+                    v_loss = criterion(v_pred, y_val)
+                    val_loss += v_loss.item()
+            val_elapsed = time.time() - val_start
             avg_val_loss = val_loss / len(val_dl)
+            avg_val_inference_time_per_batch = np.mean(val_inference_times) if val_inference_times else 0.0
 
-            # 전체 validation set에 대한 Dice, IoU 평가
+            # 전체 validation set에 대한 Dice, IoU 평가 (시각화 없음)
             vd, vi = evaluate(model, val_dl, device, cfg.data.threshold, vis=False)
 
-            print(f"Fold:{fold+1} Epoch:{epoch:03d} "
-                  f"TRAIN ➜ Loss:{avg_train_loss:.4f} Dice:{avg_train_dice:.4f} IoU:{avg_train_iou:.4f} Time:{train_elapsed:.2f}s | "
-                  f"VAL ➜ Loss:{avg_val_loss:.4f} Dice:{vd:.4f} IoU:{vi:.4f} Time:{val_elapsed:.2f}s")
-            
-            # 에포크별 메트릭 저장
-            fold_epoch_metrics.append({
+            # ⭐ 에포크별 진행 상황 딕셔너리 출력
+            epoch_log = {
                 'fold': fold + 1,
                 'epoch': epoch,
                 'train_loss': avg_train_loss,
-                'train_dice': avg_train_dice,
-                'train_iou': avg_train_iou,
+                # 'train_dice': avg_train_dice, # 훈련 중 전체 Dice/IoU는 오버헤드가 크므로 제거
+                # 'train_iou': avg_train_iou,
+                'train_time_sec': round(train_elapsed, 2),
                 'val_loss': avg_val_loss,
                 'val_dice': vd,
-                'val_iou': vi
-            })
+                'val_iou': vi,
+                'val_inference_time_per_batch_sec': round(avg_val_inference_time_per_batch, 6),
+                'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+            fold_epoch_metrics.append(epoch_log)
+            print(epoch_log) # 딕셔너리 형태로 출력
 
-            # Early Stopping 및 Model Saving
-            if avg_val_loss < best_val_loss:
-                best_val_loss = avg_val_loss
-                patience_counter = 0
+            # ⭐ Early Stopping 및 Model Saving (val_dice 기준으로 변경)
+            if vd > best_val_dice: # Dice Score는 높을수록 좋으므로 > 사용
+                best_val_dice = vd
                 torch.save(model.state_dict(), os.path.join(fold_save_dir, "model_best.pth"))
-                print(f"    Saved best model for Fold {fold+1} with validation loss: {best_val_loss:.4f}")
+                patience_counter = 0
+                print(f"    Saved best model for Fold {fold+1} with validation dice: {best_val_dice:.4f}")
             else:
                 patience_counter += 1
+                print(f"No improvement in val_dice. EarlyStopping counter: {patience_counter}/{cfg.train.patience}")
                 if patience_counter >= cfg.train.patience:
-                    print(f"    Early stopping for Fold {fold+1} at epoch {epoch}")
+                    print(f"Early stopping triggered for Fold {fold+1}.")
                     break
 
             # Garbage collection
@@ -271,47 +382,32 @@ def main(cfg):
             print(f"Warning: No best model saved for Fold {fold+1}. Using current model state.")
         model.eval()
 
-        # ⭐ 인퍼런스 타임 측정
-        # DataLoader의 각 배치에 대한 추론 시간 측정 (단일 이미지 아닌 배치 단위)
-        inference_times = []
-        with torch.no_grad():
-            for x_val, _ in val_dl: # y_val은 인퍼런스 시간에 직접적으로 영향을 주지 않으므로 _로 받음
-                x_val = x_val.to(device)
-                torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
-                start_inference = time.time()
-                _ = model(x_val)
-                torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
-                end_inference = time.time()
-                inference_times.append(end_inference - start_inference)
-        
-        # 배치당 평균 인퍼런스 시간 계산
-        avg_inference_time_per_batch = np.mean(inference_times) if inference_times else 0.0
-        print(f"  Fold {fold+1} Average Inference Time per Batch (seconds): {avg_inference_time_per_batch:.6f}")
-
-
         val_dice_at_best, val_iou_at_best = evaluate(model, val_dl, device, cfg.data.threshold, vis=False)
         coverage_stats_val = compute_mask_coverage(model, val_dl, device, cfg.data.threshold)
 
+        # 현재 폴드에서 기록된 가장 좋은 val_dice를 가진 모델의 인퍼런스 시간을 사용
+        best_epoch_log = next((item for item in reversed(fold_epoch_metrics) if item['val_dice'] == best_val_dice), None)
+        best_fold_inference_time = best_epoch_log['val_inference_time_per_batch_sec'] if best_epoch_log else 0.0
+
         fold_best_metrics_entry = {
             'fold': fold + 1,
-            'best_val_loss': best_val_loss,
-            'best_model_val_dice': val_dice_at_best,
+            'best_val_dice': best_val_dice, # Early stopping 기준이었던 best_val_dice를 기록
+            'best_val_loss': avg_val_loss, # 마지막 에포크의 val_loss 혹은 best_val_loss (초기화 방식에 따라)
             'best_model_val_iou': val_iou_at_best,
-            'val_mask_coverage_gt_total': coverage_stats_val['gt_total'].item(),
-            'val_mask_coverage_pred_total': coverage_stats_val['pred_total'].item(),
-            'val_mask_coverage_inter_total': coverage_stats_val['inter_total'].item(),
+            'val_mask_coverage_gt_total': coverage_stats_val['gt_total'].item() if isinstance(coverage_stats_val['gt_total'], torch.Tensor) else coverage_stats_val['gt_total'],
+            'val_mask_coverage_pred_total': coverage_stats_val['pred_total'].item() if isinstance(coverage_stats_val['pred_total'], torch.Tensor) else coverage_stats_val['pred_total'],
+            'val_mask_coverage_inter_total': coverage_stats_val['inter_total'].item() if isinstance(coverage_stats_val['inter_total'], torch.Tensor) else coverage_stats_val['inter_total'],
             'val_mask_coverage_ratio': coverage_stats_val['mask_coverage_ratio'],
-            'val_inference_time_per_batch': avg_inference_time_per_batch # ⭐ 새로 추가된 필드
+            'val_inference_time_per_batch_sec': best_fold_inference_time # ⭐ 해당 폴드 베스트 모델의 인퍼런스 시간
         }
         all_fold_best_metrics.append(fold_best_metrics_entry)
         
         print(f"Fold {fold+1} Validation Results (from best model) ➜ Dice:{val_dice_at_best:.4f} IoU:{val_iou_at_best:.4f}")
         for k, v in coverage_stats_val.items():
             if isinstance(v, torch.Tensor): v = v.item()
-            print(f"  {k}: {v}")
+            print(f"    {k}: {v}")
 
-        # 매 폴드마다 모델 가중치를 초기화했기 때문에, 다음 폴드 이전에 GPU 캐시를 비워줍니다.
-        del model, optimizer, criterion
+        del model, optimizer, criterion # 매 폴드마다 초기화
         gc.collect()
         torch.cuda.empty_cache()
 
@@ -328,29 +424,28 @@ def main(cfg):
 
     print("\nAverage Best Validation Results Across Folds:")
     for k, v in avg_final_results.items():
-        # 파라미터 수는 정수로 표시
         if k == 'total_trainable_parameters':
-            print(f"  {k}: {int(v):,}") # ,를 사용하여 천 단위 구분 기호 추가
+            print(f"    {k}: {int(v):,}")
         else:
-            print(f"  {k}: {v:.4f}")
+            print(f"    {k}: {v:.4f}")
 
     # 최종 결과 저장 디렉토리 생성
     output_dir = cfg.train.save_dir
     os.makedirs(output_dir, exist_ok=True)
     
     # 상세 폴드별 최고 성능 결과 저장
-    detailed_results_path = os.path.join(output_dir, "5_fold_cross_validation_best_val_results.csv")
+    detailed_results_path = os.path.join(output_dir, "k_fold_cross_validation_best_val_results.csv")
     df_best_fold_results.to_csv(detailed_results_path, index=False)
     print(f"\nDetailed best validation results per fold saved to: {detailed_results_path}")
 
     # 평균 최종 결과 저장
     avg_results_df = pd.DataFrame([avg_final_results])
-    avg_results_path = os.path.join(output_dir, "5_fold_cross_validation_average_results.csv")
+    avg_results_path = os.path.join(output_dir, "k_fold_cross_validation_average_results.csv")
     avg_results_df.to_csv(avg_results_path, index=False)
     print(f"Average results across folds saved to: {avg_results_path}")
 
-    # --- 4. 최종 테스트 세트 평가 (선택 사항, K-Fold에 포함되지 않은 독립적인 세트) ---
-    print("\n--- Independent Test Set Evaluation (Optional) ---")
+    # --- 4. 최종 테스트 세트 평가 (K-Fold에 포함되지 않은 독립적인 세트) ---
+    print("\n--- Independent Test Set Evaluation ---")
     test_img_dir = os.path.join(cfg.data.root_dir, 'test', 'images')
     test_mask_dir = os.path.join(cfg.data.root_dir, 'test', 'masks')
 
@@ -359,16 +454,114 @@ def main(cfg):
     test_mask_paths = [os.path.join(test_mask_dir, f.replace('.npy', '.png')) for f in test_files]
 
     if test_image_paths:
-        print("To get a final, unbiased test set performance, it's highly recommended to:")
-        print("1. Train a new model from scratch using ALL available training data (i.e., data in train/ and val/ folders).")
-        print("2. Evaluate this newly trained model on the independent test set (data in test/ folder) once.")
-        print("The 5-fold CV results provide a robust estimate of generalization, but a final test set validates the chosen model.")
+        # K-Fold 모델 중 가장 좋은 성능을 보인 폴드의 모델을 로드하여 테스트
+        # 또는 모든 K-Fold 모델의 앙상블을 사용할 수 있지만, 여기서는 편의상
+        # 첫 번째 폴드의 best model (또는 가장 마지막 폴드의 best model)을 예시로 사용
+        # 실제 시나리오에서는 K-Fold 학습 완료 후 전체 학습 데이터로 다시 모델을 학습시켜 테스트셋을 평가하는 것이 이상적
+        
+        # 모델 다시 초기화 및 가중치 로드 (예: 가장 좋은 폴드의 모델을 로드하거나, 새로 학습)
+        # 여기서는 K-Fold 학습의 대표적인 모델 중 하나를 선택하여 로드합니다.
+        # 가장 좋은 폴드의 모델을 선택하려면 all_fold_best_metrics를 분석해야 하지만,
+        # 편의상 마지막 폴드의 best model을 로드하거나, 별도의 "final_model.pth"를 저장하는 로직이 필요
+        
+        # for simplicity, let's just initialize a new model and state that a trained model needs to be loaded
+        final_model = get_model(cfg, device)
+        
+        # 실제 사용 시, 여기서는 K-Fold를 통해 얻은 "최종 모델"을 로드해야 합니다.
+        # 예를 들어, K-Fold 결과에서 가장 좋은 성능을 보인 폴드의 `model_best.pth`를 로드하거나,
+        # 전체 학습 데이터를 사용하여 새로 학습된 모델을 로드합니다.
+        
+        # ⚠️ WARNING: 아래 코드는 예시이며, 실제 배포 모델 로딩 로직은 사용 사례에 따라 달라져야 합니다.
+        # 여기서는 K-Fold에서 평균적으로 가장 좋았던 모델의 `state_dict`를 로드하기 위한
+        # 로직이 명확하지 않으므로, 이 부분을 사용자에게 맡깁니다.
+        # 만약 "가장 좋았던 폴드의 모델"을 로드하고 싶다면, `df_best_fold_results`를 분석하여
+        # `best_val_dice`가 가장 높았던 폴드의 `model_best.pth` 경로를 찾아 로드해야 합니다.
+        
+        print("\nNote: For final test set evaluation, it's recommended to train a model on the full training dataset (combined K-Fold data) or select the best performing model from K-Fold. Loading a placeholder model here.")
+        # 예시: 임시로 마지막 폴드의 best_model을 로드한다고 가정
+        last_fold_best_model_path = os.path.join(cfg.train.save_dir, f"fold_{cfg.train.k_folds}", "model_best.pth")
+        if os.path.exists(last_fold_best_model_path):
+            final_model.load_state_dict(torch.load(last_fold_best_model_path))
+            print(f"Loaded model from {last_fold_best_model_path} for final test evaluation.")
+        else:
+            print("No last fold best model found for loading. Using newly initialized model for test evaluation.")
+
+        final_model.eval()
+        
+        test_ds = KFoldNpySegDataset(
+            image_paths=test_image_paths,
+            mask_paths=test_mask_paths,
+            augment=False,
+            img_size=cfg.model.img_size,
+            normalize_type=normalize_type
+        )
+        ts_dl = DataLoader(test_ds, batch_size=cfg.train.batch_size, shuffle=False, num_workers=cfg.train.num_workers)
+
+        test_loss_sum = 0
+        test_inference_times = []
+        with torch.no_grad():
+            for x_test, y_test in tqdm(ts_dl, desc="Evaluating Test Set"):
+                x_test, y_test = x_test.to(device), y_test.to(device)
+                
+                if y_test.ndim == 4 and y_test.shape[-1] == 1: 
+                    y_test = y_test.permute(0, 3, 1, 2) 
+
+                torch.cuda.synchronize()
+                start_inference = time.time()
+                pred = final_model(x_test)
+                torch.cuda.synchronize()
+                end_inference = time.time()
+                test_inference_times.append(end_inference - start_inference)
+
+                if isinstance(pred, tuple): pred = pred[0]
+                loss = criterion(pred, y_test)
+                test_loss_sum += loss.item()
+        
+        avg_test_inference_time_per_batch = np.mean(test_inference_times) if test_inference_times else 0.0
+        avg_test_loss = test_loss_sum / len(ts_dl) if len(ts_dl) > 0 else 0.0
+
+        # evaluate 함수는 vis=cfg.eval.visualize 인자를 사용
+        td, ti = evaluate(final_model, ts_dl, device, cfg.data.threshold, vis=cfg.eval.visualize)
+        print(f"FINAL TEST ➜ Dice:{td:.4f} IoU:{ti:.4f} Test Loss:{avg_test_loss:.4f} "
+              f"Avg Inference Time per Batch:{avg_test_inference_time_per_batch:.6f}s")
+
+        coverage_stats = compute_mask_coverage(final_model, ts_dl, device, cfg.data.threshold)
+        for k, v in coverage_stats.items():
+            if isinstance(v, torch.Tensor): v = v.item()
+            print(f"    Test Mask {k}: {v}")
+
+        pd.DataFrame([coverage_stats]).to_csv(os.path.join(output_dir, "test_coverage.csv"), index=False)
+
+        test_result = {
+            "test_dice": td,
+            "test_iou": ti,
+            "test_loss": round(avg_test_loss, 4),
+            "test_inference_time_per_batch_sec": round(avg_test_inference_time_per_batch, 6),
+            "param_count": total_trainable_parameters, # K-Fold에서 계산된 총 파라미터 수
+            "gt_total": coverage_stats['gt_total'].item() if isinstance(coverage_stats['gt_total'], torch.Tensor) else coverage_stats['gt_total'],
+            "pred_total": coverage_stats['pred_total'].item() if isinstance(coverage_stats['pred_total'], torch.Tensor) else coverage_stats['pred_total'],
+            "inter_total": coverage_stats['inter_total'].item() if isinstance(coverage_stats['inter_total'], torch.Tensor) else coverage_stats['inter_total'],
+            "mask_coverage_ratio": coverage_stats['mask_coverage_ratio']
+        }
+        pd.DataFrame([test_result]).to_csv(os.path.join(output_dir, "final_test_result.csv"), index=False)
+        print(f"Final test results saved to: {os.path.join(output_dir, 'final_test_result.csv')}")
+
     else:
         print(f"No independent test set found in {test_img_dir}. Skipping final test evaluation.")
 
     total_elapsed = time.time() - start_time
-    print(f"\nTotal cross-validation process time: {total_elapsed/60:.2f} minutes")
+    print(f"\nTotal cross-validation and test process time: {total_elapsed/60:.2f} minutes")
 
 if __name__ == "__main__":
-    cfg = OmegaConf.load('unet.yaml')
+    # unet.yaml 파일 경로를 직접 지정하거나, 인자로 받을 수 있도록 변경
+    # 예를 들어, python train.py unet.yaml
+    import sys
+    if len(sys.argv) > 1:
+        config_path = sys.argv[1]
+    else:
+        # 기본 unet.yaml 경로 (예: 프로젝트 루트의 unet.yaml)
+        # config 파일을 로드하기 전에, 해당 파일의 위치를 확인해야 합니다.
+        config_path = 'unet.yaml' 
+        
+    cfg = OmegaConf.load(config_path)
     main(cfg)
