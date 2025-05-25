@@ -8,15 +8,12 @@ class MedSAM(nn.Module):
         super().__init__()
         self.sam = sam_model_registry["vit_b"](checkpoint=checkpoint)
 
-        # Enable gradients for Image Encoder
         for p in self.sam.image_encoder.parameters():
             p.requires_grad = True
 
-        # Freeze Prompt Encoder
         for p in self.sam.prompt_encoder.parameters():
             p.requires_grad = False
         
-        # Enable gradients for Mask Decoder
         for p in self.sam.mask_decoder.parameters():
             p.requires_grad = True
         
@@ -41,30 +38,20 @@ class MedSAM(nn.Module):
             masks=resized_prompt_masks
         )
         
-        # ⭐ 핵심 수정 부분: sparse_embeddings가 비어있는 경우 처리
-        # sparse_embeddings.shape[1]이 0이라는 것은 유효한 토큰이 없다는 의미
-        # 그러나 mask_decoder는 sparse_prompt_embeddings.size(0)을 요구하므로 None으로 전달할 수 없음.
-        # 따라서 배치 크기 4에 해당하는 빈 토큰 텐서를 생성하여 전달합니다.
+        # ⭐ 핵심 수정 부분: sparse_embeddings의 두 번째 차원(토큰 수)이 0인 경우 None으로 전달
+        # MaskDecoder는 sparse_prompt_embeddings가 None일 때 image_embeddings를 반복 확장하지 않음.
+        # dense_embeddings는 이미 image_embeddings의 배치 크기와 일치하므로 바로 사용 가능.
         if sparse_embeddings.shape[1] == 0:
-            # MaskDecoder가 요구하는 (batch_size, num_tokens, embedding_dim) 형태의
-            # 빈 sparse_prompt_embeddings 텐서를 생성합니다.
-            # 여기서 num_tokens는 0으로, embedding_dim은 256으로 설정 (SAM의 임베딩 차원)
-            # image_embeddings의 배치 크기(sparse_embeddings.shape[0])를 사용
-            _sparse_embeddings = torch.empty(
-                (sparse_embeddings.shape[0], 0, 256), # (Batch Size, 0, Embedding Dim)
-                dtype=sparse_embeddings.dtype,
-                device=sparse_embeddings.device
-            )
+            _sparse_embeddings = None 
             _dense_embeddings = dense_embeddings
         else:
-            # sparse_embeddings에 유효한 토큰이 있는 경우 그대로 사용
             _sparse_embeddings = sparse_embeddings
             _dense_embeddings = dense_embeddings
 
         low_res_masks, iou_predictions = self.sam.mask_decoder(
             image_embeddings=image_embeddings,
             image_pe=self.sam.prompt_encoder.get_dense_pe(),
-            sparse_prompt_embeddings=_sparse_embeddings,
+            sparse_prompt_embeddings=_sparse_embeddings, # None 또는 유효한 텐서
             dense_prompt_embeddings=_dense_embeddings,
             multimask_output=False
         )
