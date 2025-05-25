@@ -25,10 +25,10 @@ class MedSAM(nn.Module):
         if image.shape[1] == 1:
             image = image.repeat(1, 3, 1, 1)
 
-        # Encode image
+        # Step 1: Image encoding
         image_embeddings = self.sam.image_encoder(image)  # (B, C, H', W')
 
-        # Resize GT mask to 256x256
+        # Step 2: Resize GT mask to 256x256
         resized_prompt_masks = F.interpolate(
             prompt_masks.float(),
             size=(256, 256),
@@ -36,25 +36,21 @@ class MedSAM(nn.Module):
             align_corners=False
         )
 
-        # Encode mask prompt
+        # Step 3: Prompt encoding
         sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
             points=None,
             boxes=None,
             masks=resized_prompt_masks
         )
 
-        # Repeat 4x for MedSAM's multi-mask decoding logic
-        image_embeddings = torch.repeat_interleave(image_embeddings, 4, dim=0)
-        # Step 2: expand image_pe
-        image_pe = self.sam.prompt_encoder.get_dense_pe()  # (1, C, H, W)
+        # Step 4: Positional encoding (expand image_pe)
+        image_pe = self.sam.prompt_encoder.get_dense_pe()  # (1, C, H', W')
         if image_pe.dim() == 4 and image_pe.shape[0] == 1:
-            image_pe = image_pe.repeat(B * 4, 1, 1, 1)
+            image_pe = image_pe.repeat(B, 1, 1, 1)
         else:
             raise ValueError(f"Unexpected shape of image_pe: {image_pe.shape}")
-        image_pe = torch.repeat_interleave(image_pe, 4, dim=0)
-        dense_embeddings = torch.repeat_interleave(dense_embeddings, 4, dim=0)
 
-        # Decode mask
+        # Step 5: Mask decoding (SAM 내부에서 repeat_interleave 처리함)
         low_res_masks, iou_predictions = self.sam.mask_decoder(
             image_embeddings=image_embeddings,
             image_pe=image_pe,
@@ -63,6 +59,7 @@ class MedSAM(nn.Module):
             multimask_output=False
         )
 
+        # Step 6: Upsample to original size
         masks = F.interpolate(low_res_masks, original_image_size, mode='bilinear', align_corners=False)
 
         return masks, iou_predictions
