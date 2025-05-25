@@ -68,7 +68,7 @@ class MedSAM(nn.Module):
 
         sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
             points=None,
-            labels=None,
+            # labels=None,
             boxes=None,
             masks=resized_prompt_masks
         )
