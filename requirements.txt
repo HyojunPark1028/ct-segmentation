@@ -13,5 +13,4 @@ SimpleITK
 timm
 einops
 segmentation-models-pytorch
-segment_anything
 requests
