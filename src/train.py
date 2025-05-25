@@ -241,9 +241,9 @@ def main(cfg):
                     torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
                     start_inference = time.time()
                     if isinstance(model, MedSAM):
-                        v_preds, v_preds_iou_for_log = model(x_val, y_val)
+                        v_pred, v_preds_iou_for_log = model(x_val, y_val)
                     else:
-                        v_preds = model(x_val)
+                        v_pred = model(x_val)
                     torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
                     end_inference = time.time()
                     val_inference_times.append(end_inference - start_inference)
@@ -263,8 +263,6 @@ def main(cfg):
                 'fold': fold + 1,
                 'epoch': epoch,
                 'train_loss': avg_train_loss,
-                # 'train_dice': avg_train_dice, # 훈련 중 전체 Dice/IoU는 오버헤드가 크므로 제거
-                # 'train_iou': avg_train_iou,
                 'train_time_sec': round(train_elapsed, 2),
                 'val_loss': avg_val_loss,
                 'val_dice': vd,
