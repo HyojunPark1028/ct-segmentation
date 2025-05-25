@@ -23,36 +23,30 @@ class MedSAM(nn.Module):
         if image.shape[1] == 1:
             image = image.repeat(1, 3, 1, 1)
 
-        # Step 2: Encode image
-        image_embeddings = self.sam.image_encoder(image)  # shape: (B, C, H', W')
+        # Step 2: Image Encoding
+        image_embeddings = self.sam.image_encoder(image)          # (B, C, H', W')
+        image_embeddings = torch.repeat_interleave(image_embeddings, 4, dim=0)  # (B*4, ...)
 
-        # Step 3: Resize prompt mask and encode
-        resized_prompt_masks = F.interpolate(
-            prompt_masks.float(), size=(256, 256), mode='bilinear', align_corners=False
-        )
+        # Step 3: Prompt Encoding (from GT mask)
+        resized_prompt_masks = F.interpolate(prompt_masks.float(), size=(256, 256), mode='bilinear', align_corners=False)
         sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
             points=None, boxes=None, masks=resized_prompt_masks
         )
+        dense_embeddings = torch.repeat_interleave(dense_embeddings, 4, dim=0)  # (B*4, ...)
 
-        # Step 4: Repeat dense prompt to align with internal repeat of image_embeddings
-        dense_embeddings = torch.repeat_interleave(dense_embeddings, B, dim=0)  # shape: (B*B, C, H, W)
+        # Step 4: Positional Encoding
+        image_pe = self.sam.prompt_encoder.get_dense_pe()  # (1, C, H, W)
+        image_pe = image_pe.repeat(B * 4, 1, 1, 1)
 
-        # Step 5: Positional Encoding
-        image_pe = self.sam.prompt_encoder.get_dense_pe()  # (1, C, H', W')
-        image_pe = image_pe.expand(B, -1, -1, -1)  # (B, C, H', W')
-
-        # Step 6: Decode masks
+        # Step 5: Decode
         low_res_masks, iou_predictions = self.sam.mask_decoder(
-            image_embeddings=image_embeddings,         # (B, C, H', W')
-            image_pe=image_pe,                         # (B, C, H', W')
-            sparse_prompt_embeddings=sparse_embeddings, # (B, 0, D) usually
-            dense_prompt_embeddings=dense_embeddings,   # (B*B, C, H', W')
+            image_embeddings=image_embeddings,
+            image_pe=image_pe,
+            sparse_prompt_embeddings=sparse_embeddings,  # typically (B, 0, D)
+            dense_prompt_embeddings=dense_embeddings,
             multimask_output=False
         )
 
-        # Step 7: Resize to original image resolution
-        masks = F.interpolate(
-            low_res_masks, size=original_image_size, mode='bilinear', align_corners=False
-        )
-
+        # Step 6: Resize output
+        masks = F.interpolate(low_res_masks, size=original_image_size, mode='bilinear', align_corners=False)
         return masks, iou_predictions
