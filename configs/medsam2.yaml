@@ -24,6 +24,6 @@ train:
   num_workers: 4
   patience: 10
   use_amp: true
-
+  k_folds: 5
 eval:
   visualize: true
