@@ -45,8 +45,12 @@ class MedSAM(nn.Module):
 
         # Repeat 4x for MedSAM's multi-mask decoding logic
         image_embeddings = torch.repeat_interleave(image_embeddings, 4, dim=0)
-        image_pe = self.sam.prompt_encoder.get_dense_pe()
-        image_pe = image_pe.unsqueeze(0).repeat(B, 1, 1, 1)
+        # Step 2: expand image_pe
+        image_pe = self.sam.prompt_encoder.get_dense_pe()  # (1, C, H, W)
+        if image_pe.dim() == 4 and image_pe.shape[0] == 1:
+            image_pe = image_pe.repeat(B * 4, 1, 1, 1)
+        else:
+            raise ValueError(f"Unexpected shape of image_pe: {image_pe.shape}")
         image_pe = torch.repeat_interleave(image_pe, 4, dim=0)
         dense_embeddings = torch.repeat_interleave(dense_embeddings, 4, dim=0)
 
