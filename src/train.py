@@ -184,11 +184,10 @@ def main(cfg):
             for x, y in loop:
                 x, y = x.to(device), y.to(device)
 
-                loss = None
-
                 # ⭐ MedSAM 모델일 경우에만 prompt_masks(y) 전달
                 if isinstance(model, MedSAM):
                     preds, preds_iou_for_log = model(x, y) # MedSAM은 (마스크, IoU) 튜플 반환
+                    loss = criterion(preds, y)
                 else:
                     preds = model(x) # output 이름은 preds로 통일
                     # ⭐ Deep Supervision Loss 처리
