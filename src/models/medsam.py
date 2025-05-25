@@ -38,26 +38,21 @@ class MedSAM(nn.Module):
             masks=resized_prompt_masks
         )
         
-        # ⭐ 핵심 수정: sparse_embeddings가 비어있는 경우, MaskDecoder가 예상하는 최소 형태로 전달
-        # 이전 시도들이 모두 실패한 것으로 보아, MaskDecoder 내부에서
-        # sparse_prompt_embeddings.size(0)가 항상 이미지 배치 크기(B)로 계산되고,
-        # 동시에 MaskDecoder가 (아마도 마스크 프롬프트에 대해) 이미지당 4개의 내부 토큰을 기대하여
-        # image_embeddings와 image_pe를 (B * 4)로 확장하는 것으로 보입니다.
-        # 이때 dense_embeddings와 image_pe는 (B)만 유지하여 불일치 발생.
+        # MaskDecoder의 내부 로직은 마스크 프롬프트에 대해 이미지당 4개의 암시적 토큰을 가정하며
+        # image_embeddings와 image_pe를 (Batch_Size * 4)로 확장하는 것으로 보입니다.
+        # dense_embeddings 또한 이에 맞춰 배치 차원을 확장해야 합니다.
         
-        # 해결책은 dense_embeddings와 image_pe를 (B*4)로 확장하는 것입니다.
-        # MaskDecoder 내부에서 image_pe는 pos_src로 반복되므로,
-        # dense_embeddings만 (B*4)로 맞춰주면 됩니다.
-        
-        _sparse_embeddings = sparse_embeddings
-        
-        # dense_embeddings를 batch_size * 4 (예: 4 * 4 = 16)로 반복 확장
-        # (이전에도 시도했으나 다시 동일 오류 발생한 경우, 이 부분이 제대로 적용되지 않았을 가능성도 있음)
+        # sparse_embeddings는 (Batch_Size, 0, Embedding_Dim) 형태를 유지하여
+        # 'AttributeError: 'NoneType' object has no attribute 'size''를 피합니다.
+        _sparse_embeddings = sparse_embeddings 
+
+        # dense_embeddings를 (Batch_Size * 4)로 반복 확장하여 MaskDecoder의 기대치에 맞춥니다.
+        # (예: 배치 4 -> 4 * 4 = 배치 16)
         _dense_embeddings = torch.repeat_interleave(dense_embeddings, 4, dim=0)
 
         low_res_masks, iou_predictions = self.sam.mask_decoder(
             image_embeddings=image_embeddings,
-            image_pe=self.sam.prompt_encoder.get_dense_pe(), # 이 값은 B * H * W 형태
+            image_pe=self.sam.prompt_encoder.get_dense_pe(),
             sparse_prompt_embeddings=_sparse_embeddings,
             dense_prompt_embeddings=_dense_embeddings,
             multimask_output=False
