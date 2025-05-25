@@ -24,25 +24,25 @@ class MedSAM(nn.Module):
             image = image.repeat(1, 3, 1, 1)
 
         # Step 2: Image Encoding
-        image_embeddings = self.sam.image_encoder(image)          # (B, C, H', W')
-        image_embeddings = torch.repeat_interleave(image_embeddings, 4, dim=0)  # (B*4, ...)
+        image_embeddings = self.sam.image_encoder(image)  # shape: (B, C, H', W')
 
-        # Step 3: Prompt Encoding (from GT mask)
+        # Step 3: Prompt Encoding
         resized_prompt_masks = F.interpolate(prompt_masks.float(), size=(256, 256), mode='bilinear', align_corners=False)
         sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
             points=None, boxes=None, masks=resized_prompt_masks
         )
-        dense_embeddings = torch.repeat_interleave(dense_embeddings, 4, dim=0)  # (B*4, ...)
+        # ❌ NO repeat_interleave(dense_embeddings)
 
         # Step 4: Positional Encoding
         image_pe = self.sam.prompt_encoder.get_dense_pe()  # (1, C, H, W)
-        image_pe = image_pe.repeat(B * 4, 1, 1, 1)
+        image_pe = image_pe.expand(B, -1, -1, -1)  # (B, C, H, W)
+        # ❌ NO repeat(image_pe)
 
         # Step 5: Decode
         low_res_masks, iou_predictions = self.sam.mask_decoder(
             image_embeddings=image_embeddings,
             image_pe=image_pe,
-            sparse_prompt_embeddings=sparse_embeddings,  # typically (B, 0, D)
+            sparse_prompt_embeddings=sparse_embeddings,
             dense_prompt_embeddings=dense_embeddings,
             multimask_output=False
         )
