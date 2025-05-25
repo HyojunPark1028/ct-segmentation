@@ -41,23 +41,25 @@ class MedSAM(nn.Module):
             masks=resized_prompt_masks
         )
         
-        # Adjust sparse_embeddings if no sparse tokens are generated from masks
+        # ⭐ 핵심 수정 부분: sparse_embeddings가 비어있는 경우 처리
+        # sparse_embeddings.shape[1]이 0이라는 것은 유효한 토큰이 없다는 의미
+        # 그러나 mask_decoder는 sparse_prompt_embeddings.size(0)을 요구하므로 None으로 전달할 수 없음.
+        # 따라서 배치 크기 4에 해당하는 빈 토큰 텐서를 생성하여 전달합니다.
         if sparse_embeddings.shape[1] == 0:
-            _sparse_embeddings = None 
+            # MaskDecoder가 요구하는 (batch_size, num_tokens, embedding_dim) 형태의
+            # 빈 sparse_prompt_embeddings 텐서를 생성합니다.
+            # 여기서 num_tokens는 0으로, embedding_dim은 256으로 설정 (SAM의 임베딩 차원)
+            # image_embeddings의 배치 크기(sparse_embeddings.shape[0])를 사용
+            _sparse_embeddings = torch.empty(
+                (sparse_embeddings.shape[0], 0, 256), # (Batch Size, 0, Embedding Dim)
+                dtype=sparse_embeddings.dtype,
+                device=sparse_embeddings.device
+            )
             _dense_embeddings = dense_embeddings
         else:
-            # If sparse embeddings are present, they need to align with dense embeddings
-            # The previous repeat_interleave logic was based on a misunderstanding of SAM's MaskDecoder.
-            # dense_embeddings usually already matches image_embeddings batch size.
-            # If sparse_embeddings exist, MaskDecoder should handle repeating image_embeddings.
+            # sparse_embeddings에 유효한 토큰이 있는 경우 그대로 사용
             _sparse_embeddings = sparse_embeddings
-            _dense_embeddings = dense_embeddings # Keep as is, MaskDecoder expects it this way
-            
-            # --- 이전 시도 코드 (이번 문제와는 관련 없는 것으로 확인되어 삭제) ---
-            # num_prompts_per_image = sparse_embeddings.shape[0] // image_embeddings.shape[0]
-            # if num_prompts_per_image > 1:
-            #     _dense_embeddings = torch.repeat_interleave(dense_embeddings, num_prompts_per_image, dim=0)
-            # -------------------------------------------------------------
+            _dense_embeddings = dense_embeddings
 
         low_res_masks, iou_predictions = self.sam.mask_decoder(
             image_embeddings=image_embeddings,
