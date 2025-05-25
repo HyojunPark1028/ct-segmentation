@@ -19,12 +19,16 @@ class MedSAM(nn.Module):
         
     def forward(self, image: torch.Tensor, prompt_masks: torch.Tensor):
         original_image_size = image.shape[2:]
+        B = image.shape[0]
 
+        # (B, 1, H, W) → (B, 3, H, W)
         if image.shape[1] == 1:
             image = image.repeat(1, 3, 1, 1)
 
-        image_embeddings = self.sam.image_encoder(image)
+        # Encode image
+        image_embeddings = self.sam.image_encoder(image)  # (B, C, H', W')
 
+        # Resize GT mask to 256x256
         resized_prompt_masks = F.interpolate(
             prompt_masks.float(),
             size=(256, 256),
@@ -32,29 +36,26 @@ class MedSAM(nn.Module):
             align_corners=False
         )
 
+        # Encode mask prompt
         sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
             points=None,
             boxes=None,
             masks=resized_prompt_masks
         )
-        
-        # MaskDecoder의 내부 로직은 마스크 프롬프트에 대해 이미지당 4개의 암시적 토큰을 가정하며
-        # image_embeddings와 image_pe를 (Batch_Size * 4)로 확장하는 것으로 보입니다.
-        # dense_embeddings 또한 이에 맞춰 배치 차원을 확장해야 합니다.
-        
-        # sparse_embeddings는 (Batch_Size, 0, Embedding_Dim) 형태를 유지하여
-        # 'AttributeError: 'NoneType' object has no attribute 'size''를 피합니다.
-        _sparse_embeddings = sparse_embeddings 
 
-        # dense_embeddings를 (Batch_Size * 4)로 반복 확장하여 MaskDecoder의 기대치에 맞춥니다.
-        # (예: 배치 4 -> 4 * 4 = 배치 16)
-        _dense_embeddings = torch.repeat_interleave(dense_embeddings, 4, dim=0)
+        # Repeat 4x for MedSAM's multi-mask decoding logic
+        image_embeddings = torch.repeat_interleave(image_embeddings, 4, dim=0)
+        image_pe = self.sam.prompt_encoder.get_dense_pe()
+        image_pe = image_pe.unsqueeze(0).repeat(B, 1, 1, 1)
+        image_pe = torch.repeat_interleave(image_pe, 4, dim=0)
+        dense_embeddings = torch.repeat_interleave(dense_embeddings, 4, dim=0)
 
+        # Decode mask
         low_res_masks, iou_predictions = self.sam.mask_decoder(
             image_embeddings=image_embeddings,
-            image_pe=self.sam.prompt_encoder.get_dense_pe(),
-            sparse_prompt_embeddings=_sparse_embeddings,
-            dense_prompt_embeddings=_dense_embeddings,
+            image_pe=image_pe,
+            sparse_prompt_embeddings=sparse_embeddings,
+            dense_prompt_embeddings=dense_embeddings,
             multimask_output=False
         )
 
