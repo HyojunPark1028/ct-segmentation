@@ -43,19 +43,21 @@ class MedSAM(nn.Module):
             masks=resized_prompt_masks
         )
 
-        # Step 4: Positional encoding (expand image_pe)
-        image_pe = self.sam.prompt_encoder.get_dense_pe()  # (1, C, H', W')
-        if image_pe.dim() == 4 and image_pe.shape[0] == 1:
-            image_pe = image_pe.repeat(B, 1, 1, 1)
-        else:
-            raise ValueError(f"Unexpected shape of image_pe: {image_pe.shape}")
+        # Step 4: Expand dense_prompt_embeddings
+        dense_embeddings = torch.repeat_interleave(dense_embeddings, 4, dim=0)  # (B*4, C, H, W)
 
-        # Step 5: Mask decoding (SAM 내부에서 repeat_interleave 처리함)
+        # Step 5: Positional encoding
+        image_pe = self.sam.prompt_encoder.get_dense_pe()  # (1, C, H, W)
+        image_pe = image_pe.repeat(B, 1, 1, 1)  # (B, C, H, W)
+
+        # ✅ let SAM internally repeat image_embeddings and image_pe
+        # (SAM will repeat image_embeddings and image_pe to match B*4)
+
         low_res_masks, iou_predictions = self.sam.mask_decoder(
-            image_embeddings=image_embeddings,
-            image_pe=image_pe,
-            sparse_prompt_embeddings=sparse_embeddings,
-            dense_prompt_embeddings=dense_embeddings,
+            image_embeddings=image_embeddings,  # (B, ...)
+            image_pe=image_pe,                  # (B, ...)
+            sparse_prompt_embeddings=sparse_embeddings,          # (B, 0, D)
+            dense_prompt_embeddings=dense_embeddings,            # (B*4, D, H, W)
             multimask_output=False
         )
 
