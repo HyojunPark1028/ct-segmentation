@@ -21,66 +21,8 @@ from .models.utransvision import UTransVision
 from .models.medsam import MedSAM
 from .models.medsam2 import MedSAM2
 
-# 기존 Dataset을 재사용하되, K-Fold에 맞게 파일 경로 리스트를 받아 처리하도록 수정
-# NOTE: original dataset.py's NpySegDataset expects a 'split_dir'.
-# For K-Fold, we will use a modified/wrapped dataset class that accepts explicit image_paths and mask_paths.
-# Assuming `NpySegDataset` has been modified or a wrapper is used to accept `image_paths` and `mask_paths` directly.
-# If the original `dataset.py`'s `NpySegDataset` is strictly directory-based, this part needs a custom Dataset or a temporary directory setup.
-# For this response, we'll assume a `NpySegDataset` that can take lists of paths as per the user's KFold snippet's instantiation.
-import cv2 # cv2는 dataset.py에 있으므로 여기서 직접 필요하지 않지만, 이미지 처리에 사용될 수 있으므로 유지
-from albumentations.pytorch import ToTensorV2
-import albumentations as A
-
-class KFoldNpySegDataset(Dataset):
-    """
-    Modified NpySegDataset to accept explicit lists of image and mask paths,
-    suitable for K-Fold cross-validation.
-    """
-    def __init__(self, image_paths: list, mask_paths: list, augment=False, img_size=None, normalize_type="default"):
-        self.image_paths = image_paths
-        self.mask_paths = mask_paths
-        self.normalize_type = normalize_type
-
-        resize = [A.Resize(img_size, img_size)] if img_size else []
-        base_aug_ops = resize + [
-            A.HorizontalFlip(p=0.5),
-            A.RandomRotate90(p=0.5),
-            A.ShiftScaleRotate(p=0.5),
-            ToTensorV2(),
-        ]
-        no_aug_ops = resize + [ToTensorV2()]
-        self.tf = A.Compose(base_aug_ops if augment else no_aug_ops)
-
-    def __len__(self):
-        return len(self.image_paths)
-
-    def __getitem__(self, idx):
-        img_path = self.image_paths[idx]
-        mask_path = self.mask_paths[idx]
-
-        img = np.load(img_path).astype(np.float32)
-        if self.normalize_type == "sam":
-            img = img - img.min()
-            img = (img / (img.max() + 1e-8)) * 255.0
-        elif self.normalize_type == "default":
-            img = img / 255.0
-        
-        msk = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
-        msk = (msk > 127).astype(np.float32)
-        
-        img, msk = img[...,None], msk[...,None] # Add channel dimension for Albumentations
-
-        out = self.tf(image=img, mask=msk)
-        img_t = out['image']                     # C x H x W (already)
-        msk_t = out['mask']                     # H x W  or 1 x H x W depending on Albumentations
-
-        if msk_t.ndim == 3 and msk_t.shape[0] != 1:  # H x W x 1  →  1 x H x W
-            msk_t = msk_t.permute(2, 0, 1)
-        elif msk_t.ndim == 2:                       # H x W  →  1 x H x W
-            msk_t = msk_t.unsqueeze(0)
-
-        return img_t.float(), msk_t.float()
-
+from dataset import NpySegDataset
+import cv2 # cv2는 dataset.py에서 사용되므로, 여기에 직접적인 필요는 없을 수 있으나, 일반적으로 유틸리티로 임포트해두는 경우 있음
 
 # 기존 import를 유지하되 KFoldNpySegDataset을 사용
 from .losses import get_loss
@@ -188,14 +130,14 @@ def main(cfg):
         fold_val_mask_paths = [all_mask_full_paths[i] for i in val_index]
 
         # Dataset 및 DataLoader 생성 (KFoldNpySegDataset 사용)
-        train_ds = KFoldNpySegDataset(
+        train_ds = NpySegDataset(
             image_paths=fold_train_image_paths,
             mask_paths=fold_train_mask_paths,
             augment=True,
             img_size=cfg.model.img_size,
             normalize_type=normalize_type
         )
-        val_ds = KFoldNpySegDataset(
+        val_ds = NpySegDataset(
             image_paths=fold_val_image_paths,
             mask_paths=fold_val_mask_paths,
             augment=False, # Validation set should not be augmented
@@ -235,40 +177,35 @@ def main(cfg):
         for epoch in range(1, cfg.train.epochs + 1):
             model.train()
             train_loss = 0
-            # 훈련 중 Dice, IoU는 전체 DataLoader에 대한 평가보다는 배치 단위 평균으로 볼 예정
-            # train_dice = 0
-            # train_iou = 0
             train_start = time.time()
             
             # 훈련 루프
             loop = tqdm(train_dl, desc=f"Fold {fold+1} Epoch {epoch}/{cfg.train.epochs}", leave=False)
             for x, y in loop:
                 x, y = x.to(device), y.to(device)
-                
-                # ⭐ 마스크(target) 텐서의 채널 위치를 (N, C, H, W)로 맞춤 (N, H, W, 1) -> (N, 1, H, W)
-                # if y.ndim == 4 and y.shape[-1] == 1: 
-                #     y = y.permute(0, 3, 1, 2) 
 
-                #optimizer.zero_grad()
-                preds = model(x) # output 이름은 preds로 통일
+                # ⭐ MedSAM 모델일 경우에만 prompt_masks(y) 전달
+                if isinstance(model, MedSAM):
+                    preds, preds_iou_for_log = model(x, y) # MedSAM은 (마스크, IoU) 튜플 반환
+                else:
+                    preds = model(x) # output 이름은 preds로 통일
+                    # ⭐ Deep Supervision Loss 처리
+                    if isinstance(preds, tuple):
+                        pred_main, *pred_deep = preds
+                        loss = 0.98 * criterion(pred_main, y)
+                        for i, p in enumerate(pred_deep):
+                            try:
+                                h, w = y.shape[2], y.shape[3]
+                                p = nn.Conv2d(p.shape[1], 1, kernel_size=1).to(p.device)(p)
+                                p_up = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
+                                loss += 0.02 * criterion(p_up, y)
+                            except Exception as e:
+                                print(f"[ERROR] in deep supervision loss for p[{i}]: {e}")
+                                # raise # 에러 발생 시 훈련 중단 대신 메시지 출력 후 계속 진행 (또는 필요시 중단)
+                                # 현재는 에러 시 중단하는 기존 동작 유지
 
-                # ⭐ Deep Supervision Loss 처리
-                if isinstance(preds, tuple):
-                    pred_main, *pred_deep = preds
-                    loss = 0.98 * criterion(pred_main, y)
-                    for i, p in enumerate(pred_deep):
-                        try:
-                            h, w = y.shape[2], y.shape[3]
-                            p = nn.Conv2d(p.shape[1], 1, kernel_size=1).to(p.device)(p)
-                            p_up = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
-                            loss += 0.02 * criterion(p_up, y)
-                        except Exception as e:
-                            print(f"[ERROR] in deep supervision loss for p[{i}]: {e}")
-                            # raise # 에러 발생 시 훈련 중단 대신 메시지 출력 후 계속 진행 (또는 필요시 중단)
-                            # 현재는 에러 시 중단하는 기존 동작 유지
-
-                else: # 단일 출력 모델
-                    loss = criterion(preds, y)
+                    else: # 단일 출력 모델
+                        loss = criterion(preds, y)
                 
                 optimizer.zero_grad(); loss.backward()
                 # ⭐ Gradient Clipping 적용
@@ -277,10 +214,15 @@ def main(cfg):
                 train_loss += loss.item()
                 
                 # 훈련 중 현재 배치에 대한 평균 예측값 로깅
-                pred_cpu = (preds[0] if isinstance(preds, tuple) else preds).detach().cpu()
-                loop.set_postfix(loss=loss.item(), mean_pred=torch.sigmoid(pred_cpu).mean().item())
+                if isinstance(model, MedSAM):
+                    loop.set_postfix(loss=loss.item(), iou_pred=preds_iou_for_log.mean().item()) 
+                else:
+                    pred_for_log = preds[0] if isinstance(preds, tuple) else preds
+                    loop.set_postfix(loss=loss.item(), mean_pred=torch.sigmoid(pred_for_log).mean().item())
                 
-                del preds, loss # 메모리 해제
+                del x, y, loss, preds # 공통 변수 및 preds 삭제
+                if isinstance(model, MedSAM): # MedSAM 관련 변수 추가 삭제
+                    del preds_iou_for_log 
                 torch.cuda.empty_cache()
                 gc.collect()
 
@@ -295,13 +237,13 @@ def main(cfg):
                 for x_val, y_val in val_dl:
                     x_val, y_val = x_val.to(device), y_val.to(device)
                     
-                    # ⭐ 마스크(target) 텐서의 채널 위치를 (N, C, H, W)로 맞춤
-                    # if y_val.ndim == 4 and y_val.shape[-1] == 1: 
-                    #     y_val = y_val.permute(0, 3, 1, 2) 
 
                     torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
                     start_inference = time.time()
-                    v_pred = model(x_val)
+                    if isinstance(model, MedSAM):
+                        v_preds, v_preds_iou_for_log = model(x_val, y_val)
+                    else:
+                        v_preds = model(x_val)
                     torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
                     end_inference = time.time()
                     val_inference_times.append(end_inference - start_inference)
@@ -459,7 +401,7 @@ def main(cfg):
 
         final_model.eval()
         
-        test_ds = KFoldNpySegDataset(
+        test_ds = NpySegDataset(
             image_paths=test_image_paths,
             mask_paths=test_mask_paths,
             augment=False,
@@ -480,7 +422,11 @@ def main(cfg):
 
                 torch.cuda.synchronize()
                 start_inference = time.time()
-                pred = final_model(x_test)
+                if isinstance(final_model, MedSAM):
+                    # MedSAM은 (마스크, IoU) 튜플을 반환. pred에는 마스크만 할당.
+                    pred, pred_iou_for_log = final_model(x_test, y_test)
+                else:
+                    pred = final_model(x_test)
                 torch.cuda.synchronize()
                 end_inference = time.time()
                 test_inference_times.append(end_inference - start_inference)

@@ -1,5 +1,5 @@
 import torch, pandas as pd, matplotlib.pyplot as plt
-# from .models.medsam import MedSAM  # MedSAM 분기 처리를 위해 import
+from .models.medsam import MedSAM
 
 def _metric(pred, tgt, thr):
     p=(pred>thr).float(); inter=(p*tgt).sum(); union=p.sum()+tgt.sum()-inter
@@ -19,9 +19,12 @@ def evaluate(model, loader, device, thr=0.5, vis=False):
     with torch.no_grad():
         for k,(x,y) in enumerate(loader):
             x,y=x.to(device),y.to(device); 
-            output = model(x)
-            if isinstance(output, tuple):
-                output = output[0]
+            if isinstance(model, MedSAM):
+                output, output_iou = model(x, y)
+            else:
+                output = model(x)
+                if isinstance(output, tuple):
+                    output = output[0]
             p = torch.sigmoid(output)
             di,io=_metric(p,y,thr); d+=di; i+=io
             if vis and k==0: 
@@ -40,10 +43,12 @@ def compute_mask_coverage(model, loader, device, thr=0.5):
         for x, y in loader:
             x, y = x.to(device), y.to(device)
             y = (y > 0.5).float()
-            output = model(x)
-            if isinstance(output, tuple):
-                output = output[0]
-
+            if isinstance(model, MedSAM):
+                output, output_iou = model(x, y)   
+            else: 
+                output = model(x)
+                if isinstance(output, tuple):
+                    output = output[0]
             pred = torch.sigmoid(output) > thr
             inter = (pred * y).sum()
             gt_total += y.sum()
