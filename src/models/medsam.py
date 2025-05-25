@@ -38,8 +38,19 @@ class MedSAM(nn.Module):
         if image.shape[1] == 1:
             image = image.repeat(1, 3, 1, 1)
 
+        # --------------------- 디버깅 시작 ---------------------
+        print(f"\n--- MedSAM forward pass Debugging ---")
+        print(f"1. Input 'image' shape: {image.shape}")
+        print(f"   Input 'prompt_masks' shape: {prompt_masks.shape}")
+        # -----------------------------------------------------            
+
         # 1. Image Encoder (SAM의 비전 트랜스포머)
         image_embeddings = self.sam.image_encoder(image)
+
+        # --------------------- 디버깅 계속 ---------------------
+        print(f"2. After image_encoder, 'image_embeddings' shape: {image_embeddings.shape}")
+        # -----------------------------------------------------
+
 
         # 2. Prompt Encoder: 마스크 프롬프트만 사용
         # prompt_masks는 (batch_size, 1, H, W) 형태여야 합니다. (이진 마스크)
@@ -66,12 +77,43 @@ class MedSAM(nn.Module):
             align_corners=False
         )
 
+        # --------------------- 디버깅 계속 ---------------------
+        print(f"3. Resized 'prompt_masks' shape (to 256x256): {resized_prompt_masks.shape}")
+        # -----------------------------------------------------
+
+
         sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
             points=None,
             # labels=None,
             boxes=None,
             masks=resized_prompt_masks
         )
+
+        # --------------------- 디버깅 계속 ---------------------
+        print(f"4. After prompt_encoder:")
+        print(f"   'sparse_embeddings' shape: {sparse_embeddings.shape}")
+        print(f"   'dense_embeddings' shape: {dense_embeddings.shape}")
+
+        simulated_tokens_shape_0 = sparse_embeddings.shape[0]
+        print(f"   Simulated 'tokens.shape[0]' (from sparse_embeddings batch dim): {simulated_tokens_shape_0}")
+
+        # image_embeddings가 반복될 경우의 배치 크기
+        simulated_src_batch_size = image_embeddings.shape[0] * simulated_tokens_shape_0 // image_embeddings.shape[0] # simplified to just sparse_embeddings.shape[0]
+        # 위 줄은 sparse_embeddings.shape[0] 과 같습니다.
+        simulated_src_batch_size = sparse_embeddings.shape[0]
+
+        print(f"   Expected 'src' (image_embeddings after repeat_interleave) batch size: {simulated_src_batch_size}")
+        print(f"   'dense_embeddings' batch size (for addition): {dense_embeddings.shape[0]}")
+
+        # 여기에서 두 텐서의 첫 번째 차원(배치 차원)이 일치해야 합니다.
+        if simulated_src_batch_size != dense_embeddings.shape[0]:
+            print(f"   !!! Batch size mismatch detected before MaskDecoder call !!!")
+            print(f"   Proposed src batch size: {simulated_src_batch_size}, dense_embeddings batch size: {dense_embeddings.shape[0]}")
+            # 이전 시도했던 repeat_interleave 로직은 MaskDecoder의 내부 처리 방식과 맞지 않았으므로 제거합니다.
+            # 이 디버깅 출력으로 문제의 원인을 파악합니다.
+        # --------------------- 디버깅 끝 ---------------------
+
+
 
         num_prompts_per_image = sparse_embeddings.shape[0] // image_embeddings.shape[0]
         
