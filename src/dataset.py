@@ -37,10 +37,6 @@ class NpySegDataset(Dataset):
 
         # ⭐ 확인: Image_Slice.py에서 float32로 저장되었으므로, 여기서도 float32로 로드
         img = np.load(img_path).astype(np.float32)
-        mask = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE).astype(np.float32)
-        
-        # 마스크 값 정규화: 0 또는 1 (png 파일에서 0/255로 저장했으므로)
-        mask = mask / 255.0 
 
         # ⭐ 기존 normalize_type: sam 로직은 그대로 유지 (이제 올바른 HU 값을 받게 됨)
         if self.normalize_type == "sam":
@@ -49,13 +45,19 @@ class NpySegDataset(Dataset):
             img = (img / (img.max() + 1e-8)) * 255.0 # 최대값을 255로 만듦
         else:
             img = (img + 1024) / 2048.0
-            
-        # Albumentations 적용을 위한 1채널 이미지 처리: (H, W) -> (H, W, 1)
-        # Albumentations는 기본적으로 H, W, C 형태를 기대합니다.
-        data = {"image": img, "mask": mask}
-        transformed_data = self.tf(**data)
-        
-        image = transformed_data["image"] # 이미 ToTensorV2가 적용되어 (C, H, W) 형태
-        mask = transformed_data["mask"]   # 이미 ToTensorV2가 적용되어 (C, H, W) 형태
 
-        return image, mask
+        msk = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+        msk = (msk > 127).astype(np.float32)
+        
+        img, msk = img[...,None], msk[...,None] # Add channel dimension for Albumentations
+
+        out = self.tf(image=img, mask=msk)
+        img_t = out['image']                     # C x H x W (already)
+        msk_t = out['mask']                     # H x W  or 1 x H x W depending on Albumentations
+
+        if msk_t.ndim == 3 and msk_t.shape[0] != 1:  # H x W x 1  →  1 x H x W
+            msk_t = msk_t.permute(2, 0, 1)
+        elif msk_t.ndim == 2:                       # H x W  →  1 x H x W
+            msk_t = msk_t.unsqueeze(0)
+
+        return img_t.float(), msk_t.float()

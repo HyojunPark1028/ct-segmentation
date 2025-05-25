@@ -21,7 +21,7 @@ from .models.utransvision import UTransVision
 from .models.medsam import MedSAM
 from .models.medsam2 import MedSAM2
 
-from dataset import NpySegDataset
+from .dataset import NpySegDataset
 import cv2 # cv2는 dataset.py에서 사용되므로, 여기에 직접적인 필요는 없을 수 있으나, 일반적으로 유틸리티로 임포트해두는 경우 있음
 
 # 기존 import를 유지하되 KFoldNpySegDataset을 사용

@@ -8,7 +8,7 @@ experiment:
   seed: 42
 
 data:
-  root_dir: "./src/content/data"          # contains train/ val/ test/ sub‑dirs
+  root_dir: "C:/Users/Hyojun Park/Paper/new_data/output_dataset"          # contains train/ val/ test/ sub‑dirs
   threshold: 0.3
 
 train:
