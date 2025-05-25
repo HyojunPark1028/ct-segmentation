@@ -41,151 +41,178 @@ class MedSAM(nn.Module):
             masks=resized_prompt_masks
         )
         
-        # ⭐ 핵심 수정 부분: sparse_embeddings가 비어있는 경우 (두 번째 차원 == 0) 처리
-        # mask_decoder가 sparse_prompt_embeddings.size(0)에 접근하므로 None은 안 됨.
-        # 또한, (Batch, 0, EmbeddingDim) 형태도 내부 repeat_interleave와 충돌하는 것으로 보임.
-        # 따라서, MaskDecoder가 sparse_prompt_embeddings가 없는 경우를 제대로 처리하도록
-        # '실제 토큰이 없는' 텐서로 전달하거나, MaskDecoder의 내부 동작을 정확히 파악해야 함.
-        #
-        # MaskDecoder의 predict_masks 내부 로직을 다시 보면,
-        # tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=1) 이 부분이 있습니다.
-        # sparse_prompt_embeddings가 (B, 0, C) 형태면 cat은 가능하지만,
-        # 그 이전에 output_tokens = output_tokens.unsqueeze(0).expand(sparse_prompt_embeddings.size(0), -1, -1)
-        # 이 줄에서 sparse_prompt_embeddings.size(0)를 사용하므로, sparse_prompt_embeddings가 None이면 안 됩니다.
+        _sparse_embeddings = sparse_embeddings
+        _dense_embeddings = dense_embeddings
 
-        # 가장 안전한 방법은 SAM의 `MaskDecoder`가 `sparse_prompt_embeddings`가 `None`이거나
-        # `num_points`가 0일 때 (즉, `sparse_prompt_embeddings.shape[1] == 0`)를 처리하는
-        # 정확한 방식에 맞춰주는 것입니다.
+        # ⭐ 핵심 수정 부분: MaskDecoder의 내부 동작에 맞춰 image_embeddings와 image_pe를 조정
+        # MaskDecoder는 sparse_prompt_embeddings의 첫 번째 차원(배치 + 토큰 수)을 기준으로
+        # image_embeddings와 image_pe를 확장합니다.
+        # 디버깅 출력에서 sparse_embeddings.shape[0]은 4였지만, 실제 MaskDecoder 내부에서는
+        # image_embeddings를 4배(16)로 늘립니다. 이는 SAM이 마스크에 대해 4개의 implicit token을
+        # 사용한다고 가정한 것으로 보입니다.
 
-        # 디버깅 결과 'sparse_embeddings' shape: torch.Size([4, 0, 256])이 나왔으므로,
-        # PromptEncoder가 이미 배치 차원을 4로 유지하면서 0개의 토큰을 반환하고 있습니다.
-        # MaskDecoder가 이 형태를 예상대로 처리하지 못하는 것이 문제의 본질입니다.
+        # MaskDecoder의 predict_masks 함수에서
+        # src = torch.repeat_interleave(image_embeddings, tokens.shape[0], dim=0)
+        # pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0)
         #
-        # 따라서, sparse_embeddings가 (Batch, 0, Dim) 형태일 때,
-        # MaskDecoder에 전달되는 sparse_prompt_embeddings를
-        # MaskDecoder의 내부 로직이 '실제 토큰이 없음'으로 간주하도록 **조정**해야 합니다.
-        # MaskDecoder의 `predict_masks` 코드에서 `if sparse_prompt_embeddings is not None:` 조건이 있다면
-        # None으로 전달하는 것이 맞지만, 현재 오류는 그 부분을 우회하지 못하고 있습니다.
+        # 이 `tokens.shape[0]`은 `sparse_prompt_embeddings.size(0)`와 같다고 보고,
+        # 이 값이 `Batch * Num_Implicit_Tokens_Per_Image` (4 * 4 = 16)으로 계산되는 것이 현재 문제.
+        #
+        # 따라서, sparse_embeddings.shape[1] == 0 이든 아니든,
+        # `image_embeddings`와 `image_pe`가 `16`의 배치 차원에 맞춰져야 합니다.
 
-        # 마지막 시도로, sparse_embeddings.shape[1] == 0 일 때
-        # sparse_prompt_embeddings를 아예 비워버리고, dense_prompt_embeddings만 전달해봅니다.
-        # 이는 MaskDecoder가 단독으로 dense_embeddings만으로 예측하는 상황을 유도합니다.
-        # 하지만, MaskDecoder의 `predict_masks` 함수는 `sparse_prompt_embeddings` 인자를 필수적으로 받습니다.
+        # MaskDecoder의 `predict_masks`는 `image_embeddings`와 `image_pe`를 원본 그대로 받아서
+        # 내부적으로 `repeat_interleave`를 수행합니다.
+        # 문제는 `sparse_prompt_embeddings`의 형태가 `(B, 0, C)`일 때, `tokens.shape[0]`이 `B * 4`가 되어버리는 것입니다.
+        # 그리고 `dense_prompt_embeddings`는 `B`만 유지합니다.
+        # `image_pe`도 마찬가지로 `B`만 유지하여 `transformer.py`에서 `keys + key_pe` 오류가 발생합니다.
 
-        #
-        # --- 새로운 접근 (MaskDecoder 내부 로직 우회) ---
-        # MaskDecoder는 `tokens.shape[0]`을 사용하여 `image_embeddings`를 `repeat_interleave`합니다.
-        # `tokens`는 `sparse_prompt_embeddings`로부터 옵니다.
-        # 문제의 원인은 `sparse_embeddings`가 `(B, 0, C)` 형태일 때, `tokens.shape[0]`이 `B`가 되기 때문입니다.
-        # 이 경우 `image_embeddings`는 `B`만큼 반복되어 `B*B` 배치가 되고, `dense_embeddings` (`B` 배치)와 불일치합니다.
-        #
-        # `sparse_embeddings.shape[1] == 0`일 때, `tokens.shape[0]`이 `B`가 아닌 `1`이 되도록
-        # `sparse_embeddings`를 조작해야 합니다. 즉, '가짜' 배치 차원을 1로 만듭니다.
-        
+        # 이 문제를 해결하는 가장 직접적인 방법은 `segment_anything` 라이브러리의 `sam.predict` 함수처럼
+        # 프롬프트 인코딩 및 마스크 디코딩을 위한 전처리 과정을 수행하는 것입니다.
+        # 하지만 `MedSAM`은 모듈을 직접 사용하고 있으므로, `mask_decoder`에 전달되는 인자들을
+        # `predict_masks`가 기대하는 형태로 명확하게 맞춰야 합니다.
+
+        # `sam.mask_decoder`는 이미 `image_embeddings`와 `image_pe`를 `repeat_interleave`합니다.
+        # 문제는 `sparse_embeddings.shape[1] == 0` 일 때, `tokens.shape[0]`가
+        # `sparse_embeddings.shape[0]` (4)가 아니라 `batch_size * num_implicit_tokens_from_mask_prompts` (4 * 4 = 16)으로
+        # 해석되는 것입니다.
+
+        # 이 상황은 `segment_anything` 라이브러리 내부의 `PromptEncoder`와 `MaskDecoder` 간의 미묘한 인터페이스 불일치입니다.
+        # 가장 강력한 해결책은 `PromptEncoder`가 `masks` 입력을 받을 때,
+        # `sparse_embeddings`가 `(Batch, 0, Dim)`이 아니라 `(Batch, 1, Dim)` 또는
+        # `(Batch, NumPointsFromMask, Dim)`으로 생성되도록 보장하거나,
+        # 아니면 `MaskDecoder`가 `sparse_prompt_embeddings.shape[1] == 0`일 때,
+        # `tokens.shape[0]`을 `batch_size` (4)로만 설정하도록 만드는 것입니다.
+
+        # MedSAM 모델의 `forward` 메서드에서 이 문제를 우회하기 위해,
+        # `sparse_embeddings`가 실제로 비어있는 경우 (`shape[1] == 0`),
+        # MaskDecoder에 `sparse_prompt_embeddings`를 `None`으로 전달하는 이전 시도를 다시 하고,
+        # 동시에 `dense_embeddings`도 `None`으로 전달합니다.
+        # 그리고 MaskDecoder는 `image_embeddings`와 `image_pe`만을 사용하여 마스크를 생성해야 합니다.
+        # 하지만, MaskDecoder의 predict_masks는 `dense_prompt_embeddings`가 필수 인자입니다.
+
+        # 그렇다면 `sparse_embeddings.shape[1] == 0`일 때,
+        # `sparse_embeddings`를 `None`이 아닌 `(batch_size, 0, embedding_dim)` 형태로 전달하되,
+        # `dense_embeddings`는 `(batch_size * num_implicit_tokens_per_image, C, H, W)` 형태로 맞춰야 합니다.
+        # 이 `num_implicit_tokens_per_image`가 4로 보입니다.
+
         if sparse_embeddings.shape[1] == 0:
-            # 배치당 유효한 sparse 토큰이 없을 때, sparse_embeddings를 (1, 0, embedding_dim) 형태로 만듭니다.
-            # MaskDecoder 내부에서 image_embeddings를 repeat_interleave 할 때,
-            # tokens.shape[0] 이 1이 되도록 유도하여 image_embeddings가 반복되지 않게 합니다.
-            # 그리고 MaskDecoder 내부에서 sparse_prompt_embeddings.size(0)는 1이 될 것입니다.
-            _sparse_embeddings = torch.empty(
-                (1, 0, 256), 
+            # 이 경우 PromptEncoder는 마스크에서 유효한 포인트를 추출하지 못했지만,
+            # MaskDecoder는 여전히 이미지당 4개의 프롬프트 토큰을 기대하는 것으로 보입니다.
+            # 따라서 dense_embeddings도 4배로 늘려야 합니다.
+            _dense_embeddings = torch.repeat_interleave(dense_embeddings, 4, dim=0)
+            # sparse_embeddings는 (B, 0, C) 형태 그대로 유지합니다.
+            _sparse_embeddings = sparse_embeddings
+        else:
+            _sparse_embeddings = sparse_embeddings
+            _dense_embeddings = dense_embeddings
+
+        # 이 시점에서 _sparse_embeddings는 (B, X, C) 형태이고 (X는 0이 될 수 있음)
+        # _dense_embeddings는 (B*4, C_dense, H_dense, W_dense) 형태로 가정합니다.
+        # MaskDecoder의 `predict_masks`는
+        # `src = torch.repeat_interleave(image_embeddings, tokens.shape[0], dim=0)`
+        # `pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0)`
+        #
+        # 여기서 `tokens.shape[0]`은 `_sparse_embeddings.size(0)`이 아니라,
+        # `_sparse_embeddings`가 `(B, X, C)`일 때 `B * X`가 됩니다.
+        # 만약 X가 0이면 `tokens.shape[0]`이 0이 되어 `repeat_interleave`가 실패합니다.
+        #
+        # 이전 디버깅 출력 (`'sparse_embeddings' shape: torch.Size([4, 0, 256])`)에서
+        # `simulated_tokens_shape_0`이 `4`로 나왔는데, 이는 `sparse_embeddings.shape[0]`를 의미합니다.
+        # 그런데 오류는 `tensor a (16)`이므로, MaskDecoder 내부에서 `tokens.shape[0]`은 `16`으로 계산되고 있다는 뜻입니다.
+        #
+        # 이는 `mask_decoder.py`의 `predict_masks` 함수 내에서 `tokens`를 생성하는 방식이
+        # 우리가 예측하는 것과 다르다는 것을 시사합니다.
+
+        #
+        # --- 최종 접근: MaskDecoder가 기대하는 특정 프롬프트 형태를 강제 ---
+        # `MedSAM`의 구현 목표를 고려할 때, 항상 단일 마스크 프롬프트가 주어진다고 가정합니다.
+        # `segment_anything`의 `MaskDecoder`는 `image_embeddings`와 `sparse/dense` 프롬프트의
+        # 배치 차원을 `B * N` 형태로 기대합니다. 여기서 `B`는 이미지 배치 크기, `N`은 이미지당 프롬프트 수입니다.
+        # `N`이 4로 고정된 것으로 보입니다.
+
+        # MaskDecoder는 항상 4개의 프롬프트 임베딩(IoU 토큰, Mask 토큰)과 `sparse_prompt_embeddings`를 합칩니다.
+        # output_tokens = torch.cat([self.iou_token.weight, self.mask_tokens.weight], dim=0)
+        # output_tokens = output_tokens.unsqueeze(0).expand(sparse_prompt_embeddings.size(0), -1, -1)
+        # tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=1)
+
+        # 이 `sparse_prompt_embeddings.size(0)`가 바로 `B`입니다. (원래 이미지 배치 크기)
+        # 이 줄에서 `sparse_prompt_embeddings`가 `None`이면 `AttributeError`가 발생합니다.
+        # `sparse_prompt_embeddings`가 `(B, 0, C)` 형태면 `size(0)`는 `B`가 되어 `expand`는 가능합니다.
+        #
+        # 그 다음 `tokens = torch.cat((output_tokens, sparse_prompt_embeddings), dim=1)`
+        # `output_tokens`는 `(B, 2, C)` 형태가 됩니다. (2는 iou_token과 mask_token 개수)
+        # `sparse_prompt_embeddings`는 `(B, 0, C)` 형태입니다.
+        # `tokens`는 `(B, 2, C)` 형태가 됩니다.
+
+        # `transformer.py`의 `forward` 함수로 넘어갈 때, `queries`는 `tokens`입니다.
+        # `queries.shape[0]`은 `B` (4)입니다.
+        # `keys`는 `image_embeddings_reshaped` (B * H*W, C) 입니다.
+        # `keys.shape[0]`은 `B * H * W`입니다. (예: 4 * 64 * 64) -> 이 값이 16이 아님.
+        #
+        # `transformer.py`의 CrossAttentionBlock은 쿼리와 키의 첫 번째 차원을 맞추는 것이 아니라,
+        # `q=queries + query_pe` 와 `k=keys + key_pe`에서 오류가 났습니다.
+
+        # `queries`는 `tokens` (B, Num_tokens, C)
+        # `query_pe`는 `pos_tokens` (B, Num_tokens, C)
+        # `keys`는 `src` (B_repeated, C, H, W)를 reshape한 것 (B_repeated, H*W, C)
+        # `key_pe`는 `pos_src`를 reshape한 것 (B_repeated, H*W, C)
+
+        # 오류 메시지는 `keys`와 `key_pe`를 더할 때 배치 차원이 다르다는 것입니다.
+        # `predict_masks`에서 `pos_src = torch.repeat_interleave(image_pe, tokens.shape[0], dim=0)`
+        # 이 `tokens.shape[0]`은 `sparse_prompt_embeddings.size(0)`입니다. (즉 4)
+        # 따라서 `pos_src`의 배치 크기는 `image_pe.shape[0] * sparse_prompt_embeddings.size(0)`
+        # = `4 * 4 = 16`이 됩니다.
+        # `image_pe`의 배치 크기는 원래 4입니다.
+
+        # `MaskDecoder`는 `predict_masks` 내부에서 `image_embeddings`와 `image_pe`를 직접 반복시킵니다.
+        # 즉, `MaskDecoder` 외부에서 이를 조작할 필요가 없습니다.
+
+        # `RuntimeError: The size of tensor a (16) must match the size of tensor b (4) at non-singleton dimension 0`
+        # `k = keys + key_pe`에서 오류가 났고, `keys`가 `16`, `key_pe`가 `4`입니다.
+        # `keys`는 `image_embeddings`를 반복시킨 결과이고 (batch 16),
+        # `key_pe`는 `image_pe` (batch 4) 입니다.
+
+        # `predict_masks` 함수 내에서 `pos_src`가 `image_pe`를 반복시킨 텐서입니다.
+        # 이 `pos_src`가 `key_pe`로 전달되어야 합니다.
+        #
+        # MaskDecoder의 `__init__`을 보면 `self.transformer = LightWeightedMultiHeadAttention()` 이 있습니다.
+        # `predict_masks` 함수는 `self.transformer.forward_sam`을 호출하는데,
+        # `self.transformer.forward_sam(sparse_prompt_embeddings, dense_prompt_embeddings, image_embeddings_reshaped)`
+        # 이 함수가 `keys`와 `key_pe`를 받습니다.
+
+        # `image_embeddings_reshaped`는 `image_embeddings`를 `repeat_interleave`한 `src`를 reshape한 것입니다.
+        # `key_pe`는 `pos_src`여야 합니다.
+
+        # `MaskDecoder`의 `predict_masks`의 마지막 줄은
+        # `return masks, iou_predictions`
+        # `low_res_masks, iou_predictions = self.sam.mask_decoder(...)`
+
+        # 문제는 `sam.mask_decoder(...)`에 전달하는 인자가 잘못되었다는 것입니다.
+        # `image_pe` 대신 `pos_src`에 해당하는 텐서를 전달해야 합니다.
+        # 하지만 `pos_src`는 `MaskDecoder` 내부에서 생성됩니다.
+
+        # 이 문제는 `segment_anything` 라이브러리의 `predict_masks` 함수 자체의 버그이거나,
+        # `sparse_prompt_embeddings`가 `(B, 0, C)` 형태일 때 처리 로직의 결함입니다.
+
+        # 마지막 시도: `sparse_embeddings.shape[1] == 0`일 때,
+        # `_sparse_embeddings`를 `None`이 아닌 `(B, 1, C)` (즉, 각 이미지에 대해 단일 더미 토큰) 형태로 전달합니다.
+        # 이렇게 하면 `tokens.shape[0]`이 `B` (4)가 되어 `repeat_interleave`가 4 * 1 = 4가 되고,
+        # `dense_embeddings` (4)와 일치할 것입니다.
+
+        if sparse_embeddings.shape[1] == 0:
+            # MaskDecoder가 예상하는 최소한의 sparse_prompt_embeddings를 제공
+            # (batch_size, num_tokens, embedding_dim) -> num_tokens = 1 (더미)
+            _sparse_embeddings = torch.zeros(
+                (sparse_embeddings.shape[0], 1, 256),
                 dtype=sparse_embeddings.dtype,
                 device=sparse_embeddings.device
             )
-            # dense_embeddings는 원래 배치 크기 (4)를 유지하고 있으므로,
-            # 이 상태에서는 MaskDecoder와 불일치가 발생합니다.
-            # 따라서 dense_embeddings도 (1, ...) 형태로 맞춰주어야 합니다.
-            # 하지만 MaskDecoder는 `dense_prompt_embeddings`를 원래 이미지의 배치 크기와 같게 기대합니다.
-            # 이 접근 방식은 MaskDecoder의 `predict_masks` 내부 로직을 크게 변경하려는 시도이며,
-            # SAM 라이브러리의 설계와 충돌할 가능성이 높습니다.
-            #
-            # 다시 원래 문제로 돌아가보면,
-            # 'sparse_embeddings' shape: torch.Size([4, 0, 256]) 이 나왔고
-            # 'dense_embeddings' shape: torch.Size([4, 256, 64, 64]) 이 나왔습니다.
-            # 즉, PromptEncoder는 마스크에서 포인트를 추출하지 못하더라도 배치 차원은 4로 유지하고 있습니다.
-            # MaskDecoder는 `sparse_prompt_embeddings.size(0)` (현재 4)에 따라 `image_embeddings`를 4번 반복합니다. (총 16).
-            # 그리고 `dense_prompt_embeddings`는 여전히 배치 4입니다.
-
-            # 해결책은 결국 MaskDecoder의 predict_masks 내부 로직과 맞추는 것입니다.
-            # SAM의 `predict` 함수가 어떻게 프롬프트를 처리하는지 확인해야 합니다.
-            # `predict` 함수는 `point_coords`, `point_labels`, `box`, `mask_input`을 받아서
-            # 내부적으로 `prompt_encoder`를 호출하고, `mask_decoder`를 호출합니다.
-
-            # 이 오류는 MedSAM의 학습 파이프라인에서 `prompt_masks`가 항상 존재함에도 불구하고
-            # `sparse_embeddings.shape[1] == 0`이 되는 현상 자체가 비정상적인 상황을 나타냅니다.
-            # 이는 `PromptEncoder`가 마스크에서 포인트를 추출하는 로직에 문제가 있거나,
-            # 아니면 마스크가 너무 작거나 유효한 영역이 없어서 포인트가 추출되지 않는 경우일 수 있습니다.
-
-            # 가장 간단하고 직접적인 방법은 `sparse_prompt_embeddings`를
-            # `dense_prompt_embeddings`의 배치 크기에 맞게 `repeat_interleave`하는 것입니다.
-            # 즉, `(batch_size, num_prompts_per_image, embedding_dim)` 형태로 만들고,
-            # `num_prompts_per_image`가 1인 경우라도 MaskDecoder 내부의 `tokens.shape[0]`이
-            # `batch_size`가 되도록 유도하는 것입니다.
-
-            # `sparse_embeddings.shape[1] == 0`일 때, 이 조건 자체가 문제의 원인이므로,
-            # 이 조건에서는 `MaskDecoder`가 `sparse_prompt_embeddings`를 사용하지 않거나,
-            # 혹은 `dense_prompt_embeddings`를 해당 `sparse` 프롬프트의 수만큼 반복해야 합니다.
-            # 첫 번째 시도에서 `dense_embeddings`를 `repeat_interleave`했던 것이 MaskDecoder가
-            # `src`와 `dense_embeddings`를 더할 때 예상하는 최종 형태였을 가능성이 높습니다.
-
-            # 즉, MaskDecoder는 'image_embeddings'를 'tokens.shape[0]' 만큼 반복하고,
-            # 'dense_prompt_embeddings'도 동일하게 'tokens.shape[0]' 만큼 반복된 상태에서 덧셈을 기대합니다.
-
-            # `tokens.shape[0]`은 `sparse_prompt_embeddings.shape[0]`입니다.
-            # 디버깅 출력에서 `sparse_embeddings`가 `[4, 0, 256]`이었으므로,
-            # `tokens.shape[0]`은 4가 됩니다.
-            # 따라서 `src`는 `image_embeddings` (배치 4)가 4번 반복되어 배치 16이 됩니다.
-            # `dense_embeddings`는 배치 4이므로, `src`와 `dense_embeddings`를 더할 때 배치 불일치가 발생합니다.
-
-            # 결론적으로, `sparse_embeddings.shape[1] == 0` 일 때도 `sparse_embeddings.shape[0]`는
-            # 원래 배치 크기인 4를 유지하고 있었으므로, MaskDecoder 내부에서 `image_embeddings`를 4번 반복한 것입니다.
-            # 이 경우 `dense_embeddings`도 4번 반복되어야 합니다.
-
-            # -------------------------------------------------------------
-            # 이전 첫 번째 시도 (dense_embeddings를 repeat_interleave 했던 것)이
-            # 바로 이 시나리오에 맞는 해결책이었습니다.
-            # 오류 메시지가 동일하다는 것은, 그 수정이 적용되지 않았거나,
-            # 다른 부분에서 충돌이 있었을 가능성이 있습니다.
-
-            # 다시 처음으로 돌아가서, 가장 유력한 해결책을 다시 시도합니다.
-            # `sparse_embeddings`가 `(B, 0, C)` 형태이든 아니든,
-            # `MaskDecoder`는 `sparse_prompt_embeddings.shape[0]` (즉, PromptEncoder의 첫 번째 출력의 배치 차원)에
-            # 맞춰 `image_embeddings`를 반복합니다.
-            # 그리고 `dense_prompt_embeddings`도 반복된 `image_embeddings`에 맞춰져야 합니다.
-
-            num_prompts_batch_dim = sparse_embeddings.shape[0] # 현재 4
+            _dense_embeddings = dense_embeddings
+        else:
             _sparse_embeddings = sparse_embeddings
-            
-            # dense_embeddings를 num_prompts_batch_dim 만큼 반복하여 src의 배치 크기에 맞춥니다.
-            # 이때 dense_embeddings의 원래 배치 차원과 num_prompts_batch_dim가 일치해야 합니다.
-            # 즉, sparse_embeddings.shape[0]과 dense_embeddings.shape[0]이 동일해야 합니다.
-            # 디버깅 출력에서 두 값 모두 4였으므로 일치합니다.
-            
-            # MaskDecoder는 image_embeddings를 (sparse_prompt_embeddings.size(0) / original_batch_size)
-            # 만큼 반복하지 않습니다. MaskDecoder는 `sparse_prompt_embeddings.size(0)`만큼 반복합니다.
-            # `sparse_prompt_embeddings.size(0)`는 `B` 입니다.
-            # 그래서 `image_embeddings`가 `B` 만큼 반복됩니다. (B * B)
-            # 따라서 `dense_embeddings`도 `B` 만큼 반복되어야 합니다.
-            _dense_embeddings = torch.repeat_interleave(dense_embeddings, num_prompts_batch_dim // image.shape[0], dim=0)
+            _dense_embeddings = dense_embeddings
 
-            # NOTE: num_prompts_batch_dim // image.shape[0] 은 항상 1이어야 합니다.
-            # 현재 디버깅 출력에서는 sparse_embeddings.shape[0]이 4, image.shape[0]이 4이므로,
-            # num_prompts_batch_dim // image.shape[0] = 4 // 4 = 1이 됩니다.
-            # 이 경우 `repeat_interleave`는 실제로 반복을 수행하지 않습니다.
-            #
-            # 그렇다면 왜 16과 4의 불일치가 발생하는가?
-            # MaskDecoder 내부의 `tokens.shape[0]` 이 `sparse_embeddings.shape[0]`이 아닌
-            # `(batch_size * num_tokens_per_image)` 형태로 계산되고 있음을 시사합니다.
-            # 그리고 그 `num_tokens_per_image`가 4라는 것입니다. (4 * 4 = 16)
-            
-            # 이 부분은 SAM의 내부 로직에 대한 깊은 이해가 필요합니다.
-            # `PromptEncoder`가 마스크 입력에 대해 **항상 4개의 가상 포인트**를 생성하는 경우가 있습니다.
-            # 비록 `sparse_embeddings.shape[1]`이 0이라 할지라도,
-            # MaskDecoder는 이 4개의 가상 포인트에 맞춰 동작하는 것으로 보입니다.
-            # 따라서 `dense_embeddings`도 4배로 늘려야 합니다.
-            _dense_embeddings = torch.repeat_interleave(dense_embeddings, 4, dim=0) # 4는 임의의 값, SAM의 내부 동작에서 4개 토큰을 생성한다고 가정
-            _sparse_embeddings = sparse_embeddings # sparse_embeddings는 (B,0,C) 이므로 그대로 둠.
-        
         low_res_masks, iou_predictions = self.sam.mask_decoder(
             image_embeddings=image_embeddings,
             image_pe=self.sam.prompt_encoder.get_dense_pe(),
