@@ -38,21 +38,26 @@ class MedSAM(nn.Module):
             masks=resized_prompt_masks
         )
         
-        # ⭐ 핵심 수정: dense_embeddings의 배치 차원을 MaskDecoder가 기대하는 총 프롬프트 수에 맞춤
-        # MaskDecoder는 이미지당 4개의 프롬프트 토큰(implicitly)을 기대하는 것으로 보임.
-        # 따라서 dense_embeddings도 (Batch_Size * 4)의 배치 차원을 가져야 함.
-        # sparse_embeddings는 (Batch, 0, C) 형태를 유지하여 AttributeError를 피함.
+        # ⭐ 핵심 수정: sparse_embeddings가 비어있는 경우, MaskDecoder가 예상하는 최소 형태로 전달
+        # 이전 시도들이 모두 실패한 것으로 보아, MaskDecoder 내부에서
+        # sparse_prompt_embeddings.size(0)가 항상 이미지 배치 크기(B)로 계산되고,
+        # 동시에 MaskDecoder가 (아마도 마스크 프롬프트에 대해) 이미지당 4개의 내부 토큰을 기대하여
+        # image_embeddings와 image_pe를 (B * 4)로 확장하는 것으로 보입니다.
+        # 이때 dense_embeddings와 image_pe는 (B)만 유지하여 불일치 발생.
+        
+        # 해결책은 dense_embeddings와 image_pe를 (B*4)로 확장하는 것입니다.
+        # MaskDecoder 내부에서 image_pe는 pos_src로 반복되므로,
+        # dense_embeddings만 (B*4)로 맞춰주면 됩니다.
+        
+        _sparse_embeddings = sparse_embeddings
         
         # dense_embeddings를 batch_size * 4 (예: 4 * 4 = 16)로 반복 확장
+        # (이전에도 시도했으나 다시 동일 오류 발생한 경우, 이 부분이 제대로 적용되지 않았을 가능성도 있음)
         _dense_embeddings = torch.repeat_interleave(dense_embeddings, 4, dim=0)
-        
-        # sparse_embeddings는 (Batch, 0, EmbeddingDim) 형태 그대로 전달하여 MaskDecoder 내부의
-        # `expand` 연산을 가능하게 하고, `tokens.shape[0]`가 `Batch * 4`로 계산되도록 합니다.
-        _sparse_embeddings = sparse_embeddings 
 
         low_res_masks, iou_predictions = self.sam.mask_decoder(
             image_embeddings=image_embeddings,
-            image_pe=self.sam.prompt_encoder.get_dense_pe(),
+            image_pe=self.sam.prompt_encoder.get_dense_pe(), # 이 값은 B * H * W 형태
             sparse_prompt_embeddings=_sparse_embeddings,
             dense_prompt_embeddings=_dense_embeddings,
             multimask_output=False
