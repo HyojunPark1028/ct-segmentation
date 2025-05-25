@@ -242,7 +242,7 @@ def main(cfg):
                     torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
                     start_inference = time.time()
                     if isinstance(model, MedSAM):
-                        v_pred, v_preds_iou_for_log = model(x_val, y_val)
+                        v_pred, v_preds_iou_for_log = model(x_val)
                     else:
                         v_pred = model(x_val)
                     torch.cuda.synchronize() # GPU 작업이 완료될 때까지 기다림
@@ -423,7 +423,7 @@ def main(cfg):
                 start_inference = time.time()
                 if isinstance(final_model, MedSAM):
                     # MedSAM은 (마스크, IoU) 튜플을 반환. pred에는 마스크만 할당.
-                    pred, pred_iou_for_log = final_model(x_test, y_test)
+                    pred, pred_iou_for_log = final_model(x_test)
                 else:
                     pred = final_model(x_test)
                 torch.cuda.synchronize()
