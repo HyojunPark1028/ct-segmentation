@@ -72,6 +72,13 @@ class MedSAM(nn.Module):
             boxes=None,
             masks=resized_prompt_masks
         )
+
+        num_prompts_per_image = sparse_embeddings.shape[0] // image_embeddings.shape[0]
+        
+        # 이미지당 여러 프롬프트가 있는 경우 dense_embeddings를 그에 따라 반복합니다.
+        if num_prompts_per_image > 1:
+            dense_embeddings = torch.repeat_interleave(dense_embeddings, num_prompts_per_image, dim=0)
+        # ⭐ 수정된 부분 끝        
         
         # 3. Mask Decoder
         low_res_masks, iou_predictions = self.sam.mask_decoder(
