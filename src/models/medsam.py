@@ -25,7 +25,8 @@ class MedSAM(nn.Module):
             classes=1,
             activation=None
         )
-        self.unet.load_state_dict(torch.load(unet_checkpoint, map_location="cpu"))
+        state_dict = torch.load(unet_checkpoint)
+        self.unet.model.load_state_dict(state_dict)
         self.unet.eval()
         for p in self.unet.parameters():
             p.requires_grad = False
