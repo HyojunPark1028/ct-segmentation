@@ -3,6 +3,7 @@ model:
   img_size: 1024
   patch_size: 32  # 기존 16에서 32로 증가
   checkpoint: weights/medsam_vit_b.pth  # 메모리 절감을 위한 ViT-B 사용
+  unet_checkpoint: weights/unet_best_model.pth
   grad_checkpointing: true
   freeze_layers: 0  # 완전 fine-tune (일부 freeze 원할 경우 숫자 조정)
 

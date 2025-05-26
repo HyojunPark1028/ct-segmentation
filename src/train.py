@@ -65,7 +65,7 @@ def get_model(cfg, device):
         from .models.sam2unet import SAM2UNet # SAM2UNet은 필요할 때만 임포트
         model = SAM2UNet(checkpoint=cfg.model.checkpoint, config=cfg.model.config)
     elif model_name == 'medsam':
-        model = MedSAM(checkpoint=cfg.model.checkpoint)
+        model = MedSAM(checkpoint=cfg.model.checkpoint,unet_checkpoint=cfg.model.unet_checkpoint)
     elif model_name == 'medsam2':
         model = MedSAM2(checkpoint=cfg.model.checkpoint, image_size=cfg.model.img_size)
     else:
@@ -186,7 +186,7 @@ def main(cfg):
 
                 # ⭐ MedSAM 모델일 경우에만 prompt_masks(y) 전달
                 if isinstance(model, MedSAM):
-                    preds, preds_iou_for_log = model(x, y) # MedSAM은 (마스크, IoU) 튜플 반환
+                    preds, preds_iou_for_log = model(x) # MedSAM은 (마스크, IoU) 튜플 반환
                     loss = criterion(preds, y)
                 else:
                     preds = model(x) # output 이름은 preds로 통일
