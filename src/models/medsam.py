@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from segment_anything.build_sam import sam_model_registry
-from src.models.unet import UNet  # ⬅️ 실제 경로에 맞게 수정 필요
+import segmentation_models_pytorch as smp
 
 class MedSAM(nn.Module):
     def __init__(self, sam_checkpoint: str, unet_checkpoint: str, out_channels: int = 1):
@@ -17,10 +17,15 @@ class MedSAM(nn.Module):
         for p in self.sam.mask_decoder.parameters():
             p.requires_grad = True
 
-        # Unet: mask predictor (eval only)
-        self.unet = UNet(use_pretrained=True)
-        state_dict = torch.load(unet_checkpoint, map_location="cpu")
-        self.unet.model.load_state_dict(state_dict)
+        # U-Net: pretrained checkpoint로 초기화 (encoder_weights=None)
+        self.unet = smp.Unet(
+            encoder_name="resnet34",
+            encoder_weights=None,  # ImageNet pretrained 안 쓰고 내가 학습한 모델만 사용
+            in_channels=1,
+            classes=1,
+            activation=None
+        )
+        self.unet.load_state_dict(torch.load(unet_checkpoint, map_location="cpu"))
         self.unet.eval()
         for p in self.unet.parameters():
             p.requires_grad = False
