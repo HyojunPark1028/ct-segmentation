@@ -26,7 +26,8 @@ class MedSAM(nn.Module):
             activation=None
         )
         state_dict = torch.load(unet_checkpoint, map_location="cpu", weights_only=False)
-        self.unet.model.load_state_dict(state_dict)
+        new_state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
+        self.unet.load_state_dict(new_state_dict)  # ✅ 정확히 맞게 로드됨
         self.unet.eval()
         for p in self.unet.parameters():
             p.requires_grad = False
