@@ -65,7 +65,7 @@ def get_model(cfg, device):
         from .models.sam2unet import SAM2UNet # SAM2UNet은 필요할 때만 임포트
         model = SAM2UNet(checkpoint=cfg.model.checkpoint, config=cfg.model.config)
     elif model_name == 'medsam':
-        model = MedSAM(checkpoint=cfg.model.checkpoint,unet_checkpoint=cfg.model.unet_checkpoint)
+        model = MedSAM(sam_checkpoint=cfg.model.checkpoint,unet_checkpoint=cfg.model.unet_checkpoint)
     elif model_name == 'medsam2':
         model = MedSAM2(checkpoint=cfg.model.checkpoint, image_size=cfg.model.img_size)
     else:
