@@ -18,7 +18,7 @@ class MedSAM(nn.Module):
             p.requires_grad = True
 
         # Unet: mask predictor (eval only)
-        self.unet = UNet()
+        self.unet = UNet(use_pretrained=True)
         self.unet.load_state_dict(torch.load(unet_checkpoint, map_location="cpu"))
         self.unet.eval()
         for p in self.unet.parameters():
