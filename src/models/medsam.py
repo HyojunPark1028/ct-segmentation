@@ -13,7 +13,7 @@ class MedSAM(nn.Module):
         for p in self.sam.image_encoder.parameters():
             p.requires_grad = True
         for p in self.sam.prompt_encoder.parameters():
-            p.requires_grad = False
+            p.requires_grad = True
         for p in self.sam.mask_decoder.parameters():
             p.requires_grad = True
 
