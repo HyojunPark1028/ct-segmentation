@@ -32,7 +32,7 @@ class MedSAM(nn.Module):
         for p in self.unet.parameters():
             p.requires_grad = False
 
-    def forward(self, image: torch.Tensor):
+    def forward(self, image: torch.Tensor, *args, **kwargs):
         """
         Arguments:
             image: (B, 1 or 3, H, W)
