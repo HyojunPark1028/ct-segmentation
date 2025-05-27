@@ -30,7 +30,7 @@ class MedSAM(nn.Module):
         self.unet.load_state_dict(new_state_dict)  # ✅ 정확히 맞게 로드됨
         self.unet.eval()
         for p in self.unet.parameters():
-            p.requires_grad = False
+            p.requires_grad = True
 
     def forward(self, image: torch.Tensor, *args, **kwargs):
         """
