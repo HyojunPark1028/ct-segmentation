@@ -13,8 +13,7 @@ class MedSAM(nn.Module):
         self.sam = sam_model_registry["vit_b"](checkpoint=sam_checkpoint)
 
         # SAM의 학습 가능/불가능 설정
-        # 현재는 모두 학습 가능으로 설정되어 있지만, 필요에 따라 image_encoder를 고정할 수 있습니다.
-        # (예: for p in self.sam.image_encoder.parameters(): p.requires_grad = False)
+        # (현재는 모두 학습 가능으로 설정되어 있지만, 필요에 따라 image_encoder를 고정할 수 있습니다.)
         for p in self.sam.image_encoder.parameters():
             p.requires_grad = True
         for p in self.sam.prompt_encoder.parameters():
@@ -69,6 +68,11 @@ class MedSAM(nn.Module):
         # SAM 이미지 인코더를 통해 이미지 임베딩 추출
         image_embedding = self.sam.image_encoder(image_for_sam_encoder)
 
+        # ⭐⭐⭐ 오류 수정: get_image_pe 대신 get_dense_pe() 사용 ⭐⭐⭐
+        image_pe = self.sam.prompt_encoder.get_dense_pe() # (1, C, H', W')
+        image_pe = image_pe.expand(image_embedding.shape[0], -1, -1, -1) # 배치 차원 확장
+
+
         # Step 2: 초기 마스크를 SAM 프롬프트로 변환
         # SAM 프롬프트는 256x256 크기를 기대합니다.
         resized_prompt_mask = F.interpolate(
@@ -87,7 +91,7 @@ class MedSAM(nn.Module):
         # Step 4: Mask Decoder를 통해 최종 마스크 예측
         low_res_masks, iou_predictions = self.sam.mask_decoder(
             image_embeddings=image_embedding,
-            image_pe=self.sam.prompt_encoder.get_image_pe(),
+            image_pe=image_pe, # 수정된 image_pe 변수 사용
             sparse_prompt_embeddings=sparse_embeddings,
             dense_prompt_embeddings=dense_embeddings,
             multimask_output=False, # 단일 마스크 출력
