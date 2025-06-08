@@ -118,7 +118,6 @@ def train_one_epoch(
 
         # Generator를 통해 마스크를 생성하고, 이에 대한 Discriminator의 출력을 받습니다.
         # (real_low_res_mask는 None으로 전달하여 D_output_for_real은 계산되지 않도록 함)
-        # ⭐ 이 줄을 수정합니다: _ 대신 3개만 언팩합니다.
         gen_masks, iou_predictions, discriminator_output_for_generated_mask_for_G = model(images, None)
 
         # Segmentation Loss를 계산합니다. (생성된 마스크와 실제 마스크 간의 유사도)
@@ -186,8 +185,7 @@ def validate_one_epoch(
             start_inference = time.time()
 
             # 모델의 예측을 수행합니다. (GAN의 Discriminator 출력은 검증 시 필요 없음)
-            # model(images, None) 호출 시, Discriminator 출력은 무시됩니다.
-            predicted_masks, _, _ = model(images, None) # ⭐ 이 줄을 수정합니다: 3개만 언팩합니다.
+            predicted_masks, _, _ = model(images, None)
             
             torch.cuda.synchronize() # GPU 작업 동기화
             end_inference = time.time()
@@ -295,7 +293,7 @@ def run_training_pipeline(cfg: OmegaConf):
         print(f"\n--- Starting Fold {fold + 1}/{cfg.kfold.n_splits} ---")
 
         # 각 폴드의 결과를 저장할 서브 디렉토리를 생성합니다.
-        fold_save_dir = os.addir.join(output_dir, f"fold_{fold+1}")
+        fold_save_dir = os.path.join(output_dir, f"fold_{fold+1}") # ⭐ 수정: os.path.join으로 변경
         os.makedirs(fold_save_dir, exist_ok=True)
 
         # 현재 폴드에 해당하는 훈련 및 검증 파일의 전체 경로 리스트를 생성합니다.
@@ -585,7 +583,7 @@ def run_training_pipeline(cfg: OmegaConf):
                 torch.cuda.synchronize() # GPU 작업 동기화
                 start_inference = time.time()
                 # MedSAM_GAN은 (마스크, IoU 예측, Discriminator 출력) 튜플을 반환
-                predicted_masks_test, _, _ = final_model(x_test, None) # ⭐ 이 줄을 수정합니다: 3개만 언팩합니다.
+                predicted_masks_test, _, _ = final_model(x_test, None)
                 torch.cuda.synchronize() # GPU 작업 동기화
                 end_inference = time.time()
                 test_inference_times.append(end_inference - start_inference)
@@ -627,7 +625,7 @@ def run_training_pipeline(cfg: OmegaConf):
             "test_inference_time_per_batch_sec": round(avg_test_inference_time_per_batch, 6),
             "param_count": total_trainable_parameters, # K-Fold에서 계산된 총 파라미터 수 포함
             "gt_total": coverage_stats['gt_pixels'].item() if isinstance(coverage_stats['gt_pixels'], torch.Tensor) else coverage_stats['gt_pixels'],
-            "pred_total": coverage_stats['pred_pixels'].item() if isinstance(coverage_stats['pred_pixels'], torch.Tensor) else coverage_stats['pred_pixels'],
+            "pred_total": coverage_stats['pred_pixels'].item() if isinstance(coverage_cats['pred_pixels'], torch.Tensor) else coverage_stats['pred_pixels'],
             "inter_total": coverage_stats['intersection'].item() if isinstance(coverage_stats['intersection'], torch.Tensor) else coverage_stats['intersection'],
             "mask_coverage_ratio": coverage_stats['coverage']
         }
