@@ -1,0 +1,37 @@
+# configs/gan_medsam.yaml (새 파일 생성 권장)
+
+model:
+  name: MedSAM_GAN
+  sam_checkpoint: weights/medsam_vit_b.pth # 실제 SAM 체크포인트 경로
+  unet_checkpoint: weights/unet_best_model.pth# 실제 U-Net 체크포인트 경로
+  out_channels: 1
+
+data:
+  data_dir: "C:/Users/Hyojun Park/Paper/ct-segmentation/content/data"
+  test_img_dir: "C:/Users/Hyojun Park/Paper/ct-segmentation/content/data/test" # 독립적인 테스트셋 경로 (없으면 비워둠)
+  image_size: 1024 # MedSAM 입력 이미지 크기
+  num_classes: 1 # 마스크 클래스 수 (병변 1개)
+
+dataloader:
+  batch_size: 4
+  num_workers: 8
+
+optimizer:
+  g_lr: 0.0001 # Generator 학습률 (SAM parts)
+  d_lr: 0.00005 # Discriminator 학습률 (보통 G보다 낮거나 다르게 설정)
+  weight_decay: 0.0001
+
+epochs: 100
+early_stopping_patience: 10
+log_interval: 10 # 10 배치마다 로그 출력
+
+seed: 42
+gpu: 0 # 사용할 GPU 번호 (0부터 시작)
+
+output_dir: outputs
+
+# GAN 관련 하이퍼파라미터
+gan_lambda_adv: 0.001 # Generator 손실에서 Adversarial Loss의 가중치 (조절 필요)
+
+kfold:
+  n_splits: 1 # K-Fold 분할 수
