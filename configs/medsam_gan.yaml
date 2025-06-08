@@ -11,9 +11,10 @@ data:
   test_img_dir: "C:/Users/Hyojun Park/Paper/ct-segmentation/content/data/test" # 독립적인 테스트셋 경로 (없으면 비워둠)
   image_size: 1024 # MedSAM 입력 이미지 크기
   num_classes: 1 # 마스크 클래스 수 (병변 1개)
-  augment: True
   threshold: 0.3
   normalize_type: sam
+
+augment: True
 
 dataloader:
   batch_size: 4
