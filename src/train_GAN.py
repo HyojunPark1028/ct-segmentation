@@ -155,7 +155,7 @@ def validate_one_epoch(
     dataloader: DataLoader,
     seg_criterion: nn.Module,
     device: torch.device,
-    cfg: OmegaConf # ⭐ 추가: cfg 객체를 인자로 받도록 수정
+    cfg: OmegaConf
 ) -> tuple[float, dict]:
     """
     모델의 한 에폭 검증을 수행하고 Segmentation 손실 및 성능 지표를 반환합니다.
@@ -285,6 +285,10 @@ def run_training_pipeline(cfg: OmegaConf):
     for fold, (train_index, val_index) in enumerate(kf.split(all_image_full_paths)):
         print(f"\n--- Starting Fold {fold + 1}/{cfg.kfold.n_splits} ---")
 
+        # 각 폴드의 결과를 저장할 서브 디렉토리를 생성합니다.
+        fold_save_dir = os.path.join(output_dir, f"fold_{fold+1}")
+        os.makedirs(fold_save_dir, exist_ok=True) # ⭐ 추가: 폴드별 저장 디렉토리 생성
+
         # 현재 폴드에 해당하는 훈련 및 검증 파일의 전체 경로 리스트를 생성합니다.
         fold_train_image_paths = [all_image_full_paths[i] for i in train_index]
         fold_train_mask_paths = [all_mask_full_paths[i] for i in train_index]
@@ -369,7 +373,7 @@ def run_training_pipeline(cfg: OmegaConf):
             epoch_train_time_sec = time.time() - epoch_start_time # 에폭 훈련 시간 계산
             
             # 검증 함수 호출 (손실과 지표 딕셔너리 반환)
-            val_seg_loss, val_metrics_dict = validate_one_epoch(model, val_dl, seg_criterion, device, cfg) # ⭐ 수정: cfg 객체 전달
+            val_seg_loss, val_metrics_dict = validate_one_epoch(model, val_dl, seg_criterion, device, cfg)
             
             # val_metrics_dict에서 추론 시간 가져오기 (없으면 0.0)
             val_inference_time_per_batch_sec = val_metrics_dict.get('val_inference_time_per_batch_sec', 0.0)
@@ -405,7 +409,7 @@ def run_training_pipeline(cfg: OmegaConf):
                     'optimizer_D_state_dict': optimizer_D.state_dict(),
                     'best_val_dice': best_val_dice,
                     'cfg': cfg
-                }, os.path.join(output_dir, f"fold_{fold+1}", "model_best.pth")) # 동적으로 생성된 output_dir 사용
+                }, os.path.join(fold_save_dir, "model_best.pth")) # ⭐ 수정: fold_save_dir 사용
                 patience_counter = 0 # 성능 개선 시 카운터 초기화
                 print(f"    Saved best model for Fold {fold+1} with validation dice: {best_val_dice:.4f}")
             else:
@@ -422,12 +426,12 @@ def run_training_pipeline(cfg: OmegaConf):
         # 폴드별 에포크 메트릭을 CSV 파일로 저장
         if fold_epoch_metrics:
             df_fold_epochs = pd.DataFrame(fold_epoch_metrics)
-            fold_epoch_metrics_path = os.path.join(output_dir, f"fold_{fold+1}", "epoch_metrics.csv") # 폴드별 서브디렉토리에 저장
+            fold_epoch_metrics_path = os.path.join(fold_save_dir, "epoch_metrics.csv") # ⭐ 수정: fold_save_dir 사용
             df_fold_epochs.to_csv(fold_epoch_metrics_path, index=False)
             print(f"    Epoch-wise metrics for Fold {fold+1} saved to: {fold_epoch_metrics_path}")
 
         print(f"\n--- Fold {fold + 1} Training Finished ---")
-        best_model_path_this_fold = os.path.join(output_dir, f"fold_{fold+1}", "model_best.pth") # 최적 모델 경로
+        best_model_path_this_fold = os.path.join(fold_save_dir, "model_best.pth") # ⭐ 수정: fold_save_dir 사용
 
         # 현재 폴드의 최적 모델을 로드하여 최종 평가를 수행합니다.
         if os.path.exists(best_model_path_this_fold):
