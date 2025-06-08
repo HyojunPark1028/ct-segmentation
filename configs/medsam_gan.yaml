@@ -3,7 +3,7 @@
 model:
   name: MedSAM_GAN
   sam_checkpoint: weights/medsam_vit_b.pth # 실제 SAM 체크포인트 경로
-  unet_checkpoint: weights/unet_best_model.pth# 실제 U-Net 체크포인트 경로
+  unet_checkpoint: weights/unet_best_model.pth # 실제 U-Net 체크포인트 경로
   out_channels: 1
 
 data:
