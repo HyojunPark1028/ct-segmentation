@@ -1,4 +1,4 @@
-# train.py
+# src/train_GAN.py
 
 import time
 import gc
@@ -12,22 +12,17 @@ from tqdm import tqdm
 from datetime import datetime
 from sklearn.model_selection import KFold
 import shutil
+import glob # ⭐ 추가: 파일 경로를 glob으로 찾기 위해 필요
 
-# 모델 임포트 변경: MedSAM 대신 MedSAM_GAN 임포트
-from .models.medsam_gan import MedSAM_GAN # Assuming you save MedSAM_GAN in models/medsam_gan.py
-# If MedSAM_GAN is in the same medsam.py, then:
-# from .models.medsam import MedSAM_GAN
+# 모델 임포트
+from .models.medsam_gan import MedSAM_GAN # Assuming MedSAM_GAN is in models/medsam_gan.py
 
-
-from .dataset import NpySegDataset
-import cv2
+from .dataset import NpySegDataset # NpySegDataset은 그대로 사용
+import cv2 # cv2는 dataset.py에서 사용됨
 
 # 기존 import를 유지하되 GAN Loss 함수 추가
 from .losses_GAN import get_segmentation_loss, get_discriminator_loss, get_generator_adversarial_loss
 from .evaluate import evaluate, compute_mask_coverage
-
-# 새로 추가되거나 변경된 부분 (MedSAM_GAN에 맞게)
-# from .models.medsam import MedSAM # 기존 MedSAM은 더 이상 직접 사용 안함
 
 def seed_everything(seed=42):
     os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
@@ -61,7 +56,7 @@ def train_one_epoch(
     total_g_loss = 0
     total_d_loss = 0
 
-    for batch_idx, (images, masks, _) in enumerate(pbar):
+    for batch_idx, (images, masks) in enumerate(pbar): # ⭐ 수정: 세 번째 반환 값 (idx) 제거
         images = images.to(device)
         masks = masks.to(device) # Original GT masks (H, W)
 
@@ -78,11 +73,11 @@ def train_one_epoch(
         # 이 단계에서는 Generator의 파라미터는 업데이트하지 않으므로 torch.no_grad() 사용
         with torch.no_grad():
             # forward 호출 시 real_low_res_mask = None -> masks, iou_predictions, discriminator_output_for_generated_mask 반환
-            gen_masks, _, disc_output_gen = model(images, None)
+            gen_masks, _, disc_output_gen_for_G_no_grad = model(images, None)
         
         # Discriminator에 실제 마스크와 가짜 마스크 입력하여 손실 계산
-        # D는 진짜를 진짜(1)로, 가짜를 가짜(0)로 예측하도록 학습
         # model.forward()에서 real_low_res_mask가 있으면 4번째 리턴 값으로 real에 대한 D의 출력이 나옴
+        # (gen_masks는 no_grad 블록에서 계산된 것이므로 여기서 다시 계산할 필요는 없음)
         _, _, disc_output_gen_for_D, disc_output_real = model(images, real_low_res_masks)
 
         # Discriminator 손실 계산
@@ -100,15 +95,15 @@ def train_one_epoch(
         # Discriminator는 G 학습 시에는 고정 (eval 모드)하거나 requires_grad=False 로 설정
         # MedSAM_GAN forward는 항상 G 파라미터를 계산하므로, D 파라미터 업데이트를 막는 것이 중요
         # `discriminator_output_for_generated_mask`를 G의 adversarial loss 계산에 사용
-        gen_masks, iou_predictions, disc_output_gen = model(images, None)
-        
+        gen_masks, iou_predictions, disc_output_gen_for_G = model(images, None) # ⭐ 변수명 변경: D 학습 시와 구분
+
         # Segmentation Loss
         seg_loss = seg_criterion(gen_masks, masks)
         total_seg_loss += seg_loss.item()
 
         # Generator Adversarial Loss: Discriminator를 속여 진짜처럼 보이게 하는 손실
         # D_output_gen_for_G는 D가 G의 출력을 '진짜'라고 예측하도록 유도
-        g_adv_loss = adv_criterion_G(disc_output_gen)
+        g_adv_loss = adv_criterion_G(disc_output_gen_for_G) # ⭐ 변수명 변경
         total_g_adv_loss += g_adv_loss.item()
 
         # 총 Generator 손실
@@ -137,7 +132,7 @@ def validate_one_epoch(model, dataloader, seg_criterion, device):
     pbar = tqdm(dataloader, desc="Validation")
     total_loss = 0
     with torch.no_grad():
-        for batch_idx, (images, masks, _) in enumerate(pbar):
+        for batch_idx, (images, masks) in enumerate(pbar): # ⭐ 수정: 세 번째 반환 값 (idx) 제거
             images = images.to(device)
             masks = masks.to(device)
 
@@ -170,52 +165,26 @@ def run_training_pipeline(cfg):
     if not os.path.exists(cfg.model.unet_checkpoint):
         raise FileNotFoundError(f"U-Net checkpoint not found at: {cfg.model.unet_checkpoint}")
     
-    # 모델 초기화 (MedSAM_GAN 사용)
-    model = MedSAM_GAN(
-        sam_checkpoint=cfg.model.sam_checkpoint,
-        unet_checkpoint=cfg.model.unet_checkpoint,
-        out_channels=cfg.model.out_channels
-    ).to(device)
+    # ⭐ 수정: NpySegDataset에 전달할 이미지/마스크 경로 리스트 생성
+    # 가정: data_dir 내부에 'images' 폴더와 'masks' 폴더가 있고, 파일 확장자는 .npy와 .png
+    train_val_image_paths = sorted(glob.glob(os.path.join(cfg.data.data_dir, "images", "*.npy")))
+    train_val_mask_paths = sorted(glob.glob(os.path.join(cfg.data.data_dir, "masks", "*.png"))) # mask는 .png로 가정
 
-    # 옵티마이저 분리: Generator(SAM parts)와 Discriminator
-    # Generator는 SAM의 학습 가능한 파라미터 (image_encoder, prompt_encoder, mask_decoder)
-    optimizer_G = torch.optim.AdamW(
-        params=[
-            {'params': model.sam.image_encoder.parameters(), 'lr': cfg.optimizer.g_lr},
-            {'params': model.sam.prompt_encoder.parameters(), 'lr': cfg.optimizer.g_lr},
-            {'params': model.sam.mask_decoder.parameters(), 'lr': cfg.optimizer.g_lr}
-        ],
-        lr=cfg.optimizer.g_lr, # 기본 lr 설정
-        weight_decay=cfg.optimizer.weight_decay
-    )
-    # Discriminator 옵티마이저
-    optimizer_D = torch.optim.AdamW(
-        model.discriminator.parameters(),
-        lr=cfg.optimizer.d_lr, # Discriminator를 위한 별도의 lr
-        weight_decay=cfg.optimizer.weight_decay
-    )
+    if len(train_val_image_paths) == 0 or len(train_val_image_paths) != len(train_val_mask_paths):
+        raise ValueError(f"No image/mask files found or mismatch in {cfg.data.data_dir}. Check paths and file types (.npy for images, .png for masks).")
 
-    # 손실 함수 설정
-    seg_criterion = get_segmentation_loss().to(device)
-    adv_criterion_D = get_discriminator_loss().to(device)
-    adv_criterion_G = get_generator_adversarial_loss().to(device)
-
-    # 스케줄러 설정 (선택 사항, 필요에 따라 G와 D 각각 설정 가능)
-    # scheduler_G = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_G, mode='min', factor=0.5, patience=5, verbose=True)
-    # scheduler_D = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_D, mode='min', factor=0.5, patience=5, verbose=True)
-
-
-    # K-Fold Cross Validation 설정
-    kf = KFold(n_splits=cfg.kfold.n_splits, shuffle=True, random_state=cfg.seed)
-    
+    # Dataset 초기화 (KFold를 위해 전체 데이터셋을 한 번에 로드)
     dataset = NpySegDataset(
-        data_dir=cfg.data.data_dir,
-        image_size=cfg.data.image_size,
-        num_classes=cfg.model.out_channels,
-        augment=cfg.augment
+        image_paths=train_val_image_paths,
+        mask_paths=train_val_mask_paths,
+        augment=cfg.data.augment,
+        img_size=cfg.data.image_size,
+        normalize_type=cfg.data.normalize_type # ⭐ 추가: normalize_type 전달
     )
 
     all_indices = list(range(len(dataset)))
+
+    kf = KFold(n_splits=cfg.kfold.n_splits, shuffle=True, random_state=cfg.seed) # 이 줄을 추가합니다.    
     
     fold_results = []
     
@@ -224,6 +193,7 @@ def run_training_pipeline(cfg):
     for fold, (train_indices, val_indices) in enumerate(kf.split(all_indices)):
         print(f"\n--- Fold {fold+1}/{cfg.kfold.n_splits} ---")
         
+        # KFold subset은 기존 dataset의 __getitem__을 사용하므로, 별도 수정 필요 없음
         fold_train_subset = torch.utils.data.Subset(dataset, train_indices)
         fold_val_subset = torch.utils.data.Subset(dataset, val_indices)
         
@@ -237,12 +207,16 @@ def run_training_pipeline(cfg):
         epochs_no_improve = 0
 
         # 각 폴드마다 모델 상태를 새로 초기화 (옵티마이저도 새로 생성)
-        # 중요: K-Fold마다 모델의 파라미터를 새로 로드하거나 초기화해야 함
         model = MedSAM_GAN(
             sam_checkpoint=cfg.model.sam_checkpoint,
             unet_checkpoint=cfg.model.unet_checkpoint,
             out_channels=cfg.model.out_channels
         ).to(device)
+
+        # Initialize loss criteria
+        seg_criterion = get_segmentation_loss()
+        adv_criterion_D = get_discriminator_loss()
+        adv_criterion_G = get_generator_adversarial_loss()
 
         # 옵티마이저도 각 폴드마다 새로 초기화
         optimizer_G = torch.optim.AdamW(
@@ -262,7 +236,6 @@ def run_training_pipeline(cfg):
 
 
         for epoch in range(cfg.epochs):
-            # train_one_epoch 함수에 GAN 관련 파라미터 전달
             train_g_loss, train_d_loss, train_seg_loss, train_g_adv_loss = train_one_epoch(
                 model, train_loader, optimizer_G, optimizer_D,
                 seg_criterion, adv_criterion_D, adv_criterion_G,
@@ -281,7 +254,6 @@ def run_training_pipeline(cfg):
                 epochs_no_improve = 0
                 
                 # 모델 저장 (Generator와 Discriminator 모두 저장)
-                # SAM과 Discriminator의 state_dict를 따로 저장하거나, 모델 전체를 저장
                 torch.save({
                     'epoch': epoch,
                     'model_G_state_dict': model.sam.state_dict(), # SAM (Generator) 부분만 저장
@@ -326,56 +298,55 @@ def run_training_pipeline(cfg):
     print(f"\nK-Fold Cross Validation Results saved to: {os.path.join(output_dir, 'kfold_results.csv')}")
 
     # 최종 테스트 (cfg.test_img_dir가 설정되어 있다면)
-    if cfg.test_img_dir and os.path.exists(cfg.test_img_dir):
+    if cfg.data.test_img_dir and os.path.exists(cfg.data.test_img_dir): # ⭐ 수정: cfg.test_img_dir -> cfg.data.test_img_dir
         print("\n--- Running final test on independent test set ---")
-        test_dataset = NpySegDataset(
-            data_dir=cfg.test_img_dir,
-            image_size=cfg.data.image_size,
-            num_classes=cfg.model.out_channels,
-            augment=False # 테스트셋은 증강하지 않음
-        )
-        test_loader = DataLoader(test_dataset, batch_size=cfg.dataloader.batch_size, shuffle=False, num_workers=cfg.dataloader.num_workers, pin_memory=True)
-        
-        # Best performing model from K-Fold (or a final combined model) should be used here
-        # For simplicity, we can load the last saved best_model.pth (from the last fold)
-        # or train a final model on all data. For now, let's just use the model as it is after K-Fold.
-        
-        # If you want to load a specific best model (e.g., from a specific fold or a new combined model):
-        # model = MedSAM_GAN(...).to(device)
-        # checkpoint = torch.load(os.path.join(output_dir, f"fold_X/best_model.pth"), map_location=device) # Choose best fold or final model
-        # model.sam.load_state_dict(checkpoint['model_G_state_dict'])
-        # model.discriminator.load_state_dict(checkpoint['model_D_state_dict'])
-        # model.eval() # Ensure eval mode for testing
+        # ⭐ 수정: test_img_dir로부터 이미지/마스크 경로 리스트 생성
+        test_image_paths = sorted(glob.glob(os.path.join(cfg.data.test_img_dir, "images", "*.npy")))
+        test_mask_paths = sorted(glob.glob(os.path.join(cfg.data.test_img_dir, "masks", "*.png"))) # mask는 .png로 가정
 
-        test_metrics = evaluate(model, test_loader, device)
-        coverage_stats = compute_mask_coverage(model, test_loader, device) # compute_mask_coverage는 모델을 받도록 수정 필요
-        
-        print(f"Final Test Metrics: {test_metrics}")
-        test_result = {
-            **test_metrics,
-            "total_trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad), # 전체 학습 가능한 파라미터 수 (SAM + Discriminator)
-            "gt_total": coverage_stats['gt_pixels'].item() if isinstance(coverage_stats['gt_pixels'], torch.Tensor) else coverage_stats['gt_pixels'],
-            "pred_total": coverage_stats['pred_pixels'].item() if isinstance(coverage_stats['pred_pixels'], torch.Tensor) else coverage_stats['pred_pixels'],
-            "inter_total": coverage_stats['intersection'].item() if isinstance(coverage_stats['intersection'], torch.Tensor) else coverage_stats['intersection'],
-            "mask_coverage_ratio": coverage_stats['coverage']
-        }
-        pd.DataFrame([test_result]).to_csv(os.path.join(output_dir, "final_test_result.csv"), index=False)
-        print(f"Final test results saved to: {os.path.join(output_dir, 'final_test_result.csv')}")
+        if len(test_image_paths) == 0 or len(test_image_paths) != len(test_mask_paths):
+            print(f"Warning: No image/mask files found or mismatch in test_img_dir {cfg.data.test_img_dir}. Skipping final test evaluation.")
+            # test_img_dir이 유효하지 않으면 테스트를 건너뜀
+            cfg.data.test_img_dir = None # 다음 단계에서 test_img_dir 검사 시 False가 되도록 설정
+        else:
+            test_dataset = NpySegDataset(
+                image_paths=test_image_paths,
+                mask_paths=test_mask_paths,
+                augment=False, # 테스트셋은 증강하지 않음
+                img_size=cfg.data.image_size,
+                normalize_type=cfg.data.normalize_type # ⭐ 추가: normalize_type 전달
+            )
+            test_loader = DataLoader(test_dataset, batch_size=cfg.dataloader.batch_size, shuffle=False, num_workers=cfg.dataloader.num_workers, pin_memory=True)
+            
+            test_metrics = evaluate(model, test_loader, device)
+            coverage_stats = compute_mask_coverage(model, test_loader, device) # compute_mask_coverage는 모델을 받도록 수정 필요
+            
+            print(f"Final Test Metrics: {test_metrics}")
+            test_result = {
+                **test_metrics,
+                "total_trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad), # 전체 학습 가능한 파라미터 수 (SAM + Discriminator)
+                "gt_total": coverage_stats['gt_pixels'].item() if isinstance(coverage_stats['gt_pixels'], torch.Tensor) else coverage_stats['gt_pixels'],
+                "pred_total": coverage_stats['pred_pixels'].item() if isinstance(coverage_stats['pred_pixels'], torch.Tensor) else coverage_stats['pred_pixels'],
+                "inter_total": coverage_stats['intersection'].item() if isinstance(coverage_stats['intersection'], torch.Tensor) else coverage_stats['intersection'],
+                "mask_coverage_ratio": coverage_stats['coverage']
+            }
+            pd.DataFrame([test_result]).to_csv(os.path.join(output_dir, "final_test_result.csv"), index=False)
+            print(f"Final test results saved to: {os.path.join(output_dir, 'final_test_result.csv')}")
 
     else:
-        print(f"No independent test set found in {cfg.test_img_dir}. Skipping final test evaluation.")
+        print(f"No independent test set found or invalid path specified. Skipping final test evaluation.") # ⭐ 메시지 변경
 
     total_elapsed = time.time() - start_time
     print(f"\nTotal cross-validation and test process time: {total_elapsed/60:.2f} minutes")
 
-if __name__ == "__main__":
-    import sys
-    if len(sys.argv) > 1:
-        config_path = sys.argv[1]
-    else:
-        # 기본 unet.yaml 대신 새로운 gan_medsam.yaml 등을 사용하도록 변경 필요
-        print("Please provide a config file path (e.g., python train.py configs/gan_medsam.yaml)")
-        sys.exit(1) # 종료 또는 기본 config 로드
+# if __name__ == "__main__": (이 부분은 외부 스크립트에서 main 함수를 호출하는 방식으로 변경되었으므로, 불필요)
+#     import sys
+#     if len(sys.argv) > 1:
+#         config_path = sys.argv[1]
+#     else:
+#         print("Please provide a config file path (e.g., python train.py configs/gan_medsam.yaml)")
+#         sys.exit(1)
+#
+#     cfg = OmegaConf.load(config_path)
+#     run_training_pipeline(cfg)
 
-    cfg = OmegaConf.load(config_path)
-    run_training_pipeline(cfg)

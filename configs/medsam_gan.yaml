@@ -1,4 +1,4 @@
-# configs/gan_medsam.yaml (새 파일 생성 권장)
+# configs/medsam_gan.yaml
 
 model:
   name: MedSAM_GAN
@@ -11,10 +11,9 @@ data:
   test_img_dir: "C:/Users/Hyojun Park/Paper/ct-segmentation/content/data/test" # 독립적인 테스트셋 경로 (없으면 비워둠)
   image_size: 1024 # MedSAM 입력 이미지 크기
   num_classes: 1 # 마스크 클래스 수 (병변 1개)
-  threshold: 0.3
-  normalize_type: sam
+  normalize_type: "sam" # ⭐ 새로 추가: 이미지 정규화 타입 (dataset.py 참조)
 
-augment: True
+augment: True # 데이터 증강 사용 여부
 
 dataloader:
   batch_size: 4
