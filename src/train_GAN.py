@@ -12,13 +12,13 @@ from tqdm import tqdm
 from datetime import datetime
 from sklearn.model_selection import KFold
 import shutil
-import glob # 데이터 경로 탐색에 여전히 유용하므로 유지
+import glob
 
 # 모델 임포트
 from .models.medsam_gan import MedSAM_GAN
 
 from .dataset import NpySegDataset
-import cv2 # dataset.py에서 사용되므로 임포트 유지
+import cv2
 
 # GAN Loss 함수 및 평가 스크립트 임포트
 from .losses_GAN import get_segmentation_loss, get_discriminator_loss, get_generator_adversarial_loss
@@ -154,7 +154,8 @@ def validate_one_epoch(
     model: nn.Module,
     dataloader: DataLoader,
     seg_criterion: nn.Module,
-    device: torch.device
+    device: torch.device,
+    cfg: OmegaConf # ⭐ 추가: cfg 객체를 인자로 받도록 수정
 ) -> tuple[float, dict]:
     """
     모델의 한 에폭 검증을 수행하고 Segmentation 손실 및 성능 지표를 반환합니다.
@@ -237,7 +238,7 @@ def run_training_pipeline(cfg: OmegaConf):
     # 'train' 폴더의 이미지 및 마스크 파일 목록을 추가합니다.
     train_img_base = os.path.join(cfg.data.data_dir, 'train', 'images')
     train_mask_base = os.path.join(cfg.data.data_dir, 'train', 'masks')
-    if os.path.exists(train_img_base): # 'images' 폴더가 존재하는지 확인
+    if os.path.exists(train_img_base):
         train_files = sorted([f for f in os.listdir(train_img_base) if f.endswith('.npy')])
         for f in train_files:
             all_image_full_paths.append(os.path.join(train_img_base, f))
@@ -247,7 +248,7 @@ def run_training_pipeline(cfg: OmegaConf):
     # 'val' 폴더의 이미지 및 마스크 파일 목록을 추가합니다.
     val_img_base = os.path.join(cfg.data.data_dir, 'val', 'images')
     val_mask_base = os.path.join(cfg.data.data_dir, 'val', 'masks')
-    if os.path.exists(val_img_base): # 'images' 폴더가 존재하는지 확인
+    if os.path.exists(val_img_base):
         val_files = sorted([f for f in os.listdir(val_img_base) if f.endswith('.npy')])
         for f in val_files:
             all_image_full_paths.append(os.path.join(val_img_base, f))
@@ -368,7 +369,7 @@ def run_training_pipeline(cfg: OmegaConf):
             epoch_train_time_sec = time.time() - epoch_start_time # 에폭 훈련 시간 계산
             
             # 검증 함수 호출 (손실과 지표 딕셔너리 반환)
-            val_seg_loss, val_metrics_dict = validate_one_epoch(model, val_dl, seg_criterion, device)
+            val_seg_loss, val_metrics_dict = validate_one_epoch(model, val_dl, seg_criterion, device, cfg) # ⭐ 수정: cfg 객체 전달
             
             # val_metrics_dict에서 추론 시간 가져오기 (없으면 0.0)
             val_inference_time_per_batch_sec = val_metrics_dict.get('val_inference_time_per_batch_sec', 0.0)
@@ -620,8 +621,7 @@ def run_training_pipeline(cfg: OmegaConf):
         print(f"Final test results saved to: {os.path.join(output_dir, 'final_test_result.csv')}")
 
     else:
-        print(f"No independent test set found or mismatch in {test_img_base}. Skipping final test evaluation.")
+        print(f"No independent test set found or invalid path specified. Skipping final test evaluation.")
 
     total_elapsed = time.time() - start_time
     print(f"\nTotal cross-validation and test process time: {total_elapsed/60:.2f} minutes")
-
