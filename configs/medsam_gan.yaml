@@ -12,8 +12,7 @@ data:
   image_size: 1024 # MedSAM 입력 이미지 크기
   num_classes: 1 # 마스크 클래스 수 (병변 1개)
   normalize_type: "sam" # ⭐ 새로 추가: 이미지 정규화 타입 (dataset.py 참조)
-
-augment: True # 데이터 증강 사용 여부
+  augment: True # 데이터 증강 사용 여부
 
 dataloader:
   batch_size: 4
