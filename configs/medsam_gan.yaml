@@ -22,9 +22,10 @@ dataloader:
   num_workers: 8 # 데이터 로딩 워커 수 (환경에 따라 조절)
 
 optimizer:
-  g_lr: 0.0001 # Generator 학습률 (SAM parts)
+  g_lr: 0.00005 # Generator 학습률 (SAM parts)
   d_lr: 0.00001 # Discriminator 학습률 (이전 시도들을 기반으로 재조정)
   weight_decay: 0.0001
+  max_grad_norm: 1.0
   d_update_interval: 2 # ⭐ 새로 추가: Discriminator를 Generator의 2배 느리게 업데이트 (2배 배치마다 1회 업데이트). 
                        #              1로 설정하면 매 배치 업데이트, 2는 2배 느리게, 3은 3배 느리게.
                        #              Discriminator가 너무 강하다면 이 값을 2, 3 등으로 늘려보세요.
@@ -39,7 +40,7 @@ gpu: 0 # 사용할 GPU 번호 (0부터 시작)
 output_dir: outputs # 학습 결과 및 모델 저장 최상위 디렉토리
 
 # GAN 관련 하이퍼파라미터
-gan_lambda_adv: 0.002 # Generator 손실에서 Adversarial Loss의 가중치 (이전 시도들을 기반으로 유지)
+gan_lambda_adv: 0.001 # Generator 손실에서 Adversarial Loss의 가중치 (이전 시도들을 기반으로 유지)
 
 kfold:
   n_splits: 5 # K-Fold 분할 수

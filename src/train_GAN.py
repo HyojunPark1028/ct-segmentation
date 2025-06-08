@@ -64,7 +64,8 @@ def train_one_epoch(
     epoch: int,
     log_interval: int,
     gan_lambda_adv: float = 0.1,
-    d_update_interval: int = 1
+    d_update_interval: int = 1,
+    max_grad_norm: float = None # ⭐ 추가: Gradient Clipping을 위한 최대 노름 값
 ) -> tuple[float, float, float, float]:
     """
     GAN 모델의 한 에폭 훈련을 수행합니다.
@@ -103,6 +104,11 @@ def train_one_epoch(
             # Discriminator 손실을 계산합니다. Discriminator는 진짜(real)는 1로, 가짜(fake)는 0으로 예측해야 합니다.
             d_loss = adv_criterion_D(discriminator_output_for_real_mask, discriminator_output_for_generated_mask)
             d_loss.backward()
+
+            # ⭐ Discriminator Gradient Clipping 적용
+            if max_grad_norm is not None:
+                torch.nn.utils.clip_grad_norm_(model.discriminator.parameters(), max_norm=max_grad_norm)
+
             optimizer_D.step()
 
             total_d_loss += d_loss.item()
@@ -132,6 +138,12 @@ def train_one_epoch(
         # Generator의 총 손실은 Segmentation Loss와 Adversarial Loss를 가중치(gan_lambda_adv)로 합산한 값입니다.
         g_loss = seg_loss + gan_lambda_adv * g_adv_loss
         g_loss.backward()
+
+        # ⭐ Generator Gradient Clipping 적용
+        if max_grad_norm is not None:
+            # Generator의 파라미터는 model.sam 하위에 있으므로, model.sam.parameters()를 클리핑
+            torch.nn.utils.clip_grad_norm_(model.sam.parameters(), max_norm=max_grad_norm)
+
         optimizer_G.step()
         
         total_g_loss += g_loss.item()
@@ -324,9 +336,9 @@ def run_training_pipeline(cfg: OmegaConf):
 
         # 훈련 및 검증 DataLoader를 생성합니다.
         train_dl = DataLoader(train_ds, batch_size=cfg.dataloader.batch_size, shuffle=True,
-                              num_workers=cfg.dataloader.num_workers, pin_memory=True, generator=g)
+                               num_workers=cfg.dataloader.num_workers, pin_memory=True, generator=g)
         val_dl = DataLoader(val_ds, batch_size=cfg.dataloader.batch_size, shuffle=False,
-                            num_workers=cfg.dataloader.num_workers, pin_memory=True)
+                               num_workers=cfg.dataloader.num_workers, pin_memory=True)
 
         # 매 폴드마다 새로운 MedSAM_GAN 모델 인스턴스를 초기화합니다.
         model = MedSAM_GAN(
@@ -376,7 +388,8 @@ def run_training_pipeline(cfg: OmegaConf):
                 model, train_dl, optimizer_G, optimizer_D,
                 seg_criterion, adv_criterion_D, adv_criterion_G,
                 device, epoch, cfg.log_interval, cfg.gan_lambda_adv,
-                cfg.optimizer.d_update_interval
+                cfg.optimizer.d_update_interval,
+                cfg.optimizer.get('max_grad_norm', None) # ⭐ max_grad_norm 인자 전달
             )
             epoch_train_time_sec = time.time() - epoch_start_time # 에폭 훈련 시간 계산
             
@@ -625,7 +638,7 @@ def run_training_pipeline(cfg: OmegaConf):
             "test_inference_time_per_batch_sec": round(avg_test_inference_time_per_batch, 6),
             "param_count": total_trainable_parameters, # K-Fold에서 계산된 총 파라미터 수 포함
             "gt_total": coverage_stats['gt_pixels'].item() if isinstance(coverage_stats['gt_pixels'], torch.Tensor) else coverage_stats['gt_pixels'],
-            "pred_total": coverage_stats['pred_pixels'].item() if isinstance(coverage_cats['pred_pixels'], torch.Tensor) else coverage_stats['pred_pixels'],
+            "pred_total": coverage_stats['pred_pixels'].item() if isinstance(coverage_stats['pred_pixels'], torch.Tensor) else coverage_stats['pred_pixels'], # ⭐ 오타 수정: coverage_cats -> coverage_stats
             "inter_total": coverage_stats['intersection'].item() if isinstance(coverage_stats['intersection'], torch.Tensor) else coverage_stats['intersection'],
             "mask_coverage_ratio": coverage_stats['coverage']
         }
