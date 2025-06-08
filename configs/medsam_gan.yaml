@@ -7,34 +7,39 @@ model:
   out_channels: 1
 
 data:
-  data_dir: "C:/Users/Hyojun Park/Paper/ct-segmentation/content/data"
-  test_img_dir: "C:/Users/Hyojun Park/Paper/ct-segmentation/content/data/test" # 독립적인 테스트셋 경로 (없으면 비워둠)
+  # Colab 환경에서는 "C:/Users/Hyojun Park/Paper/ct-segmentation/content/data" 대신
+  # Google Drive 마운트 경로(예: "/content/drive/MyDrive/Paper/ct_segmentation/output_dataset")를 사용해야 합니다.
+  data_dir: "/content/drive/MyDrive/Paper/ct_segmentation/output_dataset"
+  test_img_dir: "/content/drive/MyDrive/Paper/ct_segmentation/output_dataset/test"
   image_size: 1024 # MedSAM 입력 이미지 크기
   num_classes: 1 # 마스크 클래스 수 (병변 1개)
-  normalize_type: "sam" # ⭐ 새로 추가: 이미지 정규화 타입 (dataset.py 참조)
+  normalize_type: "sam" # 이미지 정규화 타입 (dataset.py 참조)
   augment: True # 데이터 증강 사용 여부
-  threshold: 0.3
+  threshold: 0.3 # 임계값 (Dice, IoU 계산 및 마스크 이진화에 사용)
 
 dataloader:
   batch_size: 4
-  num_workers: 8
+  num_workers: 8 # 데이터 로딩 워커 수 (환경에 따라 조절)
 
 optimizer:
   g_lr: 0.0001 # Generator 학습률 (SAM parts)
-  d_lr: 0.00001  # Discriminator 학습률 (보통 G보다 낮거나 다르게 설정)
+  d_lr: 0.00001 # Discriminator 학습률 (이전 시도들을 기반으로 재조정)
   weight_decay: 0.0001
+  d_update_interval: 2 # ⭐ 새로 추가: Discriminator를 Generator의 2배 느리게 업데이트 (2배 배치마다 1회 업데이트). 
+                       #              1로 설정하면 매 배치 업데이트, 2는 2배 느리게, 3은 3배 느리게.
+                       #              Discriminator가 너무 강하다면 이 값을 2, 3 등으로 늘려보세요.
 
-epochs: 50
-early_stopping_patience: 10
-log_interval: 10 # 10 배치마다 로그 출력
+epochs: 50 # 전체 학습 에폭 수
+early_stopping_patience: 10 # Val Dice 개선 없을 시 학습 조기 종료까지 기다릴 에폭 수
+log_interval: 10 # 훈련 중 몇 배치마다 로그 출력
 
-seed: 42
+seed: 42 # 난수 시드 (재현성 확보)
 gpu: 0 # 사용할 GPU 번호 (0부터 시작)
 
-output_dir: outputs
+output_dir: outputs # 학습 결과 및 모델 저장 최상위 디렉토리
 
 # GAN 관련 하이퍼파라미터
-gan_lambda_adv: 0.002 # Generator 손실에서 Adversarial Loss의 가중치 (조절 필요)
+gan_lambda_adv: 0.002 # Generator 손실에서 Adversarial Loss의 가중치 (이전 시도들을 기반으로 유지)
 
 kfold:
   n_splits: 5 # K-Fold 분할 수

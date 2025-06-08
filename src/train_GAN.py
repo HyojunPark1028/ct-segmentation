@@ -41,6 +41,17 @@ def seed_everything(seed=42):
     torch.backends.cudnn.benchmark = False
     # torch.use_deterministic_algorithms(True) # 필요 시 추가 (성능 저하 가능성 있음)
 
+def set_requires_grad(model_part: nn.Module, requires_grad: bool):
+    """
+    모델의 특정 부분(모듈)에 대한 파라미터의 requires_grad 속성을 설정합니다.
+    GAN 학습 시 Generator와 Discriminator의 학습을 분리하기 위해 사용됩니다.
+    Args:
+        model_part (nn.Module): requires_grad를 설정할 모델의 부분 (예: model.sam, model.discriminator).
+        requires_grad (bool): requires_grad를 True로 설정할지 False로 설정할지.
+    """
+    for param in model_part.parameters():
+        param.requires_grad = requires_grad
+
 def train_one_epoch(
     model: nn.Module,
     dataloader: DataLoader,
@@ -52,14 +63,14 @@ def train_one_epoch(
     device: torch.device,
     epoch: int,
     log_interval: int,
-    gan_lambda_adv: float = 0.1
+    gan_lambda_adv: float = 0.1,
+    d_update_interval: int = 1 # ⭐ 추가: Discriminator 업데이트 빈도 제어
 ) -> tuple[float, float, float, float]:
     """
     GAN 모델의 한 에폭 훈련을 수행합니다.
     Generator와 Discriminator를 번갈아 학습시킵니다.
     """
     model.train() # 모델을 학습 모드로 설정
-    # tqdm은 훈련 진행 상황을 시각적으로 보여주는 프로그레스 바입니다.
     pbar = tqdm(dataloader, desc=f"Epoch {epoch} Training")
     
     total_seg_loss = 0.0
@@ -70,51 +81,44 @@ def train_one_epoch(
     # 각 배치에서 이미지와 마스크를 가져옵니다.
     for batch_idx, (images, masks) in enumerate(pbar):
         images = images.to(device)
-        masks = masks.to(device) # 원본 GT 마스크 (H, W, 단일 채널)
-
-        # Discriminator에 입력할 저해상도 GT 마스크를 준비합니다 (예: 256x256).
-        # 이 마스크는 이진 마스크이므로 'nearest' 보간법을 사용합니다.
+        masks = masks.to(device)
         real_low_res_masks = F.interpolate(
             masks, size=(256, 256), mode='nearest'
         ).float()
 
-
         # --- 1. Discriminator (D) 학습 단계 ---
-        # Discriminator 옵티마이저의 그래디언트를 0으로 초기화합니다.
-        optimizer_D.zero_grad()
+        # Discriminator 업데이트 빈도를 제어합니다.
+        if (batch_idx + 1) % d_update_interval == 0:
+            # Generator (SAM)의 파라미터는 업데이트하지 않도록 그래디언트 계산을 비활성화합니다.
+            set_requires_grad(model.sam, False)
+            # Discriminator의 파라미터는 업데이트 가능하도록 그래디언트 계산을 활성화합니다.
+            set_requires_grad(model.discriminator, True)
+            
+            optimizer_D.zero_grad()
 
-        # Generator의 출력을 얻습니다. 이 단계에서는 Generator의 파라미터를 업데이트하지 않으므로
-        # torch.no_grad() 블록을 사용하여 그래디언트 계산을 비활성화합니다.
-        with torch.no_grad():
-            # MedSAM_GAN 모델의 forward는 real_low_res_mask가 None일 때,
-            # 생성된 마스크, IoU 예측, 생성된 마스크에 대한 D의 출력을 반환합니다.
-            gen_masks, _, _ = model(images, None)
-        
-        # Discriminator에 실제 마스크와 Generator가 생성한 (가짜) 마스크를 모두 입력하여
-        # 각 마스크에 대한 Discriminator의 판별 결과를 얻습니다.
-        # `model.forward()`는 real_low_res_mask가 제공되면, 4번째 반환 값으로
-        # 실제 마스크에 대한 Discriminator의 출력을 추가로 반환합니다.
-        _, _, disc_output_gen_for_D, disc_output_real = model(images, real_low_res_masks)
+            # model.forward는 (생성된 마스크, iou_predictions, 생성된 마스크에 대한 D 출력, 실제 마스크에 대한 D 출력)을 반환
+            # Generator가 frozen된 상태이므로, 생성된 마스크에 대한 D 출력은 G의 grad를 통해 역전파되지 않음
+            _, _, discriminator_output_for_generated_mask, discriminator_output_for_real_mask = model(images, real_low_res_masks)
+            
+            # Discriminator 손실을 계산합니다. Discriminator는 진짜(real)는 1로, 가짜(fake)는 0으로 예측해야 합니다.
+            d_loss = adv_criterion_D(discriminator_output_for_real_mask, discriminator_output_for_generated_mask)
+            d_loss.backward()
+            optimizer_D.step()
 
-        # Discriminator 손실을 계산합니다. Discriminator는 진짜는 1로, 가짜는 0으로 예측해야 합니다.
-        d_loss = adv_criterion_D(disc_output_real, disc_output_gen_for_D)
-        # 손실에 대한 역전파를 수행하여 그래디언트를 계산합니다.
-        d_loss.backward()
-        # Discriminator 옵티마이저를 사용하여 파라미터를 업데이트합니다.
-        optimizer_D.step()
-
-        # 총 Discriminator 손실에 현재 배치의 손실을 더합니다.
-        total_d_loss += d_loss.item()
-
+            total_d_loss += d_loss.item()
+        # else: Discriminator는 이 배치에서는 업데이트되지 않음
 
         # --- 2. Generator (G) 학습 단계 ---
-        # Generator 옵티마이저의 그래디언트를 0으로 초기화합니다.
+        # Discriminator의 파라미터는 업데이트하지 않도록 그래디언트 계산을 비활성화합니다.
+        set_requires_grad(model.discriminator, False)
+        # Generator (SAM)의 파라미터는 업데이트 가능하도록 그래디언트 계산을 활성화합니다.
+        set_requires_grad(model.sam, True)
+
         optimizer_G.zero_grad()
 
-        # Generator를 통해 마스크를 다시 생성합니다. 이번에는 Generator의 파라미터를 업데이트하기 위함입니다.
-        # Discriminator는 G 학습 시에는 고정(eval 모드)되거나 그래디언트 계산이 비활성화됩니다.
-        # MedSAM_GAN의 forward는 항상 G 파라미터를 계산하므로, D 파라미터 업데이트를 막는 것이 중요합니다.
-        gen_masks, iou_predictions, disc_output_gen_for_G = model(images, None)
+        # Generator를 통해 마스크를 생성하고, 이에 대한 Discriminator의 출력을 받습니다.
+        # (real_low_res_mask는 None으로 전달하여 D_output_for_real은 계산되지 않도록 함)
+        gen_masks, iou_predictions, discriminator_output_for_generated_mask_for_G, _ = model(images, None)
 
         # Segmentation Loss를 계산합니다. (생성된 마스크와 실제 마스크 간의 유사도)
         seg_loss = seg_criterion(gen_masks, masks)
@@ -122,21 +126,20 @@ def train_one_epoch(
 
         # Generator Adversarial Loss를 계산합니다.
         # Generator는 Discriminator를 속여 생성된 마스크가 '진짜'라고 예측하게 만들어야 합니다.
-        g_adv_loss = adv_criterion_G(disc_output_gen_for_G)
+        g_adv_loss = adv_criterion_G(discriminator_output_for_generated_mask_for_G)
         total_g_adv_loss += g_adv_loss.item()
 
         # Generator의 총 손실은 Segmentation Loss와 Adversarial Loss를 가중치(gan_lambda_adv)로 합산한 값입니다.
         g_loss = seg_loss + gan_lambda_adv * g_adv_loss
-        # 총 손실에 대한 역전파를 수행합니다.
         g_loss.backward()
-        # Generator 옵티마이저를 사용하여 파라미터를 업데이트합니다.
         optimizer_G.step()
         
         total_g_loss += g_loss.item()
 
         # 프로그레스 바에 현재 배치의 손실 값들을 표시합니다.
+        # Discriminator가 업데이트되지 않은 배치에서는 D_Loss가 이전 값으로 표시될 수 있음.
         pbar.set_postfix({
-            "D_Loss": f"{d_loss.item():.4f}",
+            "D_Loss": f"{d_loss.item():.4f}" if (batch_idx + 1) % d_update_interval == 0 else "N/A",
             "G_Seg_Loss": f"{seg_loss.item():.4f}",
             "G_Adv_Loss": f"{g_adv_loss.item():.4f}",
             "G_Total_Loss": f"{g_loss.item():.4f}"
@@ -146,7 +149,7 @@ def train_one_epoch(
     avg_seg_loss = total_seg_loss / len(dataloader)
     avg_g_adv_loss = total_g_adv_loss / len(dataloader)
     avg_g_loss = total_g_loss / len(dataloader)
-    avg_d_loss = total_d_loss / len(dataloader)
+    avg_d_loss = total_d_loss / (len(dataloader) / d_update_interval) # 실제 업데이트된 횟수로 나눔
 
     return avg_g_loss, avg_d_loss, avg_seg_loss, avg_g_adv_loss
 
@@ -168,6 +171,10 @@ def validate_one_epoch(
     # 배치당 추론 시간 측정을 위한 리스트 초기화
     val_inference_times = []
 
+    # ⭐ 평가 시에는 GAN의 Discriminator 부분은 필요 없으므로, Generator (SAM) 부분만 활성화합니다.
+    set_requires_grad(model.discriminator, False)
+    set_requires_grad(model.sam, True)
+
     with torch.no_grad(): # 그래디언트 계산 비활성화 (평가 시 메모리 절약 및 속도 향상)
         for batch_idx, (images, masks) in enumerate(pbar):
             images = images.to(device)
@@ -178,7 +185,8 @@ def validate_one_epoch(
             start_inference = time.time()
 
             # 모델의 예측을 수행합니다. (GAN의 Discriminator 출력은 검증 시 필요 없음)
-            predicted_masks, _, _ = model(images, None)
+            # model(images, None) 호출 시, Discriminator 출력은 무시됩니다.
+            predicted_masks, _, _, _ = model(images, None) 
             
             torch.cuda.synchronize() # GPU 작업 동기화
             end_inference = time.time()
@@ -197,7 +205,7 @@ def validate_one_epoch(
     # evaluate 함수는 (dice_score, iou_score) 튜플을 반환하는 것으로 가정합니다.
     # 여기서는 threshold, vis 인자는 evaluate.py의 evaluate 함수 정의에 따라 그대로 전달합니다.
     # 단, train_GAN.py의 cfg.data.threshold를 사용합니다.
-    vd, vi = evaluate(model, dataloader, device, thr=cfg.data.threshold) # cfg.data.threshold 인자 전달
+    vd, vi = evaluate(model, dataloader, device, thr=cfg.data.threshold)
     
     # 계산된 지표들을 딕셔너리 형태로 묶어 반환합니다.
     metrics = {
@@ -287,7 +295,7 @@ def run_training_pipeline(cfg: OmegaConf):
 
         # 각 폴드의 결과를 저장할 서브 디렉토리를 생성합니다.
         fold_save_dir = os.path.join(output_dir, f"fold_{fold+1}")
-        os.makedirs(fold_save_dir, exist_ok=True) # ⭐ 추가: 폴드별 저장 디렉토리 생성
+        os.makedirs(fold_save_dir, exist_ok=True)
 
         # 현재 폴드에 해당하는 훈련 및 검증 파일의 전체 경로 리스트를 생성합니다.
         fold_train_image_paths = [all_image_full_paths[i] for i in train_index]
@@ -364,11 +372,12 @@ def run_training_pipeline(cfg: OmegaConf):
         # 각 에포크 훈련 루프
         for epoch in range(1, cfg.epochs + 1):
             epoch_start_time = time.time() # 에폭 시작 시간 기록
-            # 훈련 함수 호출
+            # 훈련 함수 호출 (Discriminator 업데이트 빈도 인자 전달)
             train_g_loss, train_d_loss, train_seg_loss, train_g_adv_loss = train_one_epoch(
                 model, train_dl, optimizer_G, optimizer_D,
                 seg_criterion, adv_criterion_D, adv_criterion_G,
-                device, epoch, cfg.log_interval, cfg.gan_lambda_adv
+                device, epoch, cfg.log_interval, cfg.gan_lambda_adv,
+                cfg.optimizer.d_update_interval # ⭐ 인자 전달
             )
             epoch_train_time_sec = time.time() - epoch_start_time # 에폭 훈련 시간 계산
             
@@ -409,7 +418,7 @@ def run_training_pipeline(cfg: OmegaConf):
                     'optimizer_D_state_dict': optimizer_D.state_dict(),
                     'best_val_dice': best_val_dice,
                     'cfg': cfg
-                }, os.path.join(fold_save_dir, "model_best.pth")) # ⭐ 수정: fold_save_dir 사용
+                }, os.path.join(fold_save_dir, "model_best.pth"))
                 patience_counter = 0 # 성능 개선 시 카운터 초기화
                 print(f"    Saved best model for Fold {fold+1} with validation dice: {best_val_dice:.4f}")
             else:
@@ -426,12 +435,12 @@ def run_training_pipeline(cfg: OmegaConf):
         # 폴드별 에포크 메트릭을 CSV 파일로 저장
         if fold_epoch_metrics:
             df_fold_epochs = pd.DataFrame(fold_epoch_metrics)
-            fold_epoch_metrics_path = os.path.join(fold_save_dir, "epoch_metrics.csv") # ⭐ 수정: fold_save_dir 사용
+            fold_epoch_metrics_path = os.path.join(fold_save_dir, "epoch_metrics.csv")
             df_fold_epochs.to_csv(fold_epoch_metrics_path, index=False)
             print(f"    Epoch-wise metrics for Fold {fold+1} saved to: {fold_epoch_metrics_path}")
 
         print(f"\n--- Fold {fold + 1} Training Finished ---")
-        best_model_path_this_fold = os.path.join(fold_save_dir, "model_best.pth") # ⭐ 수정: fold_save_dir 사용
+        best_model_path_this_fold = os.path.join(fold_save_dir, "model_best.pth")
 
         # 현재 폴드의 최적 모델을 로드하여 최종 평가를 수행합니다.
         if os.path.exists(best_model_path_this_fold):
@@ -450,7 +459,7 @@ def run_training_pipeline(cfg: OmegaConf):
             model_eval = model # 최적 모델이 없으면 마지막 학습된 모델 사용
         
         # 검증 데이터셋에 대한 최종 지표 계산
-        final_fold_metrics = evaluate(model_eval, val_dl, device, thr=cfg.data.threshold) # evaluate 함수 호출
+        final_fold_metrics = evaluate(model_eval, val_dl, device, thr=cfg.data.threshold)
         # 마스크 커버리지 통계 계산
         coverage_stats_val = compute_mask_coverage(model_eval, val_dl, device, cfg.data.threshold)
 
@@ -458,14 +467,14 @@ def run_training_pipeline(cfg: OmegaConf):
         fold_best_metrics_entry = {
             'fold': fold + 1,
             'best_val_dice': final_fold_metrics.get('dice_score', -1.0),
-            'best_val_loss': val_seg_loss, # 마지막 에폭의 val_seg_loss (또는 필요시 best_val_loss를 따로 추적)
+            'best_val_loss': val_seg_loss,
             'best_model_val_iou': final_fold_metrics.get('iou_score', -1.0),
             'val_mask_coverage_gt_pixels': coverage_stats_val['gt_pixels'].item() if isinstance(coverage_stats_val['gt_pixels'], torch.Tensor) else coverage_stats_val['gt_pixels'],
             'val_mask_coverage_pred_pixels': coverage_stats_val['pred_pixels'].item() if isinstance(coverage_stats_val['pred_pixels'], torch.Tensor) else coverage_stats_val['pred_pixels'],
             'val_mask_coverage_intersection': coverage_stats_val['intersection'].item() if isinstance(coverage_stats_val['intersection'], torch.Tensor) else coverage_stats_val['intersection'],
             'val_mask_coverage_coverage': coverage_stats_val['coverage'],
             'val_mask_coverage_overpredict': coverage_stats_val['overpredict'],
-            'val_inference_time_per_batch_sec': val_metrics_dict.get('val_inference_time_per_batch_sec', 0.0) # 해당 폴드 베스트 모델의 인퍼런스 시간
+            'val_inference_time_per_batch_sec': val_metrics_dict.get('val_inference_time_per_batch_sec', 0.0)
         }
         all_fold_best_metrics.append(fold_best_metrics_entry)
         
@@ -500,7 +509,7 @@ def run_training_pipeline(cfg: OmegaConf):
             print(f"    {k}: {v:.4f}") # 소수점 4자리까지 포맷팅
 
     # 최종 결과 저장 디렉토리를 설정하고 생성합니다.
-    output_dir_final = os.path.join(cfg.output_dir) # 최상위 outputs 폴더
+    output_dir_final = os.path.join(cfg.output_dir)
     os.makedirs(output_dir_final, exist_ok=True)
     
     # 상세 폴드별 최고 성능 결과를 CSV 파일로 저장합니다.
@@ -575,15 +584,15 @@ def run_training_pipeline(cfg: OmegaConf):
                 torch.cuda.synchronize() # GPU 작업 동기화
                 start_inference = time.time()
                 # MedSAM_GAN은 (마스크, IoU 예측, Discriminator 출력) 튜플을 반환
-                pred, _, _ = final_model(x_test, None) # GAN의 D 출력은 테스트 시 불필요
+                predicted_masks_test, _, _, _ = final_model(x_test, None) # GAN의 D 출력은 테스트 시 불필요
                 torch.cuda.synchronize() # GPU 작업 동기화
                 end_inference = time.time()
                 test_inference_times.append(end_inference - start_inference)
 
-                if isinstance(pred, tuple): pred = pred[0] # 튜플인 경우 메인 마스크만 사용
+                # if isinstance(predicted_masks_test, tuple): predicted_masks_test = predicted_masks_test[0] # 이미 예상되는 반환 값이므로 주석 처리
                 
                 # 테스트 손실 계산 (Segmentation Loss)
-                loss_val = seg_criterion(pred, y_test) # seg_criterion 사용
+                loss_val = seg_criterion(predicted_masks_test, y_test) # seg_criterion 사용
                 test_loss_sum += loss_val.item()
         
         # 평균 추론 시간 및 테스트 손실 계산
