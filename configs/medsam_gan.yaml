@@ -24,7 +24,7 @@ optimizer:
   d_lr: 0.00005 # Discriminator 학습률 (보통 G보다 낮거나 다르게 설정)
   weight_decay: 0.0001
 
-epochs: 100
+epochs: 50
 early_stopping_patience: 10
 log_interval: 10 # 10 배치마다 로그 출력
 
