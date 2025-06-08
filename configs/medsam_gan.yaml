@@ -34,4 +34,4 @@ output_dir: outputs
 gan_lambda_adv: 0.001 # Generator 손실에서 Adversarial Loss의 가중치 (조절 필요)
 
 kfold:
-  n_splits: 1 # K-Fold 분할 수
+  n_splits: 2 # K-Fold 분할 수
