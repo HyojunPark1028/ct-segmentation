@@ -34,7 +34,7 @@ gpu: 0 # 사용할 GPU 번호 (0부터 시작)
 output_dir: outputs
 
 # GAN 관련 하이퍼파라미터
-gan_lambda_adv: 0.1 # Generator 손실에서 Adversarial Loss의 가중치 (조절 필요)
+gan_lambda_adv: 0.05 # Generator 손실에서 Adversarial Loss의 가중치 (조절 필요)
 
 kfold:
   n_splits: 5 # K-Fold 분할 수
