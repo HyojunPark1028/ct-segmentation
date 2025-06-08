@@ -21,7 +21,7 @@ dataloader:
 
 optimizer:
   g_lr: 0.0001 # Generator 학습률 (SAM parts)
-  d_lr: 0.00005 # Discriminator 학습률 (보통 G보다 낮거나 다르게 설정)
+  d_lr: 0.00002 # Discriminator 학습률 (보통 G보다 낮거나 다르게 설정)
   weight_decay: 0.0001
 
 epochs: 50
@@ -34,7 +34,7 @@ gpu: 0 # 사용할 GPU 번호 (0부터 시작)
 output_dir: outputs
 
 # GAN 관련 하이퍼파라미터
-gan_lambda_adv: 0.001 # Generator 손실에서 Adversarial Loss의 가중치 (조절 필요)
+gan_lambda_adv: 0.1 # Generator 손실에서 Adversarial Loss의 가중치 (조절 필요)
 
 kfold:
   n_splits: 5 # K-Fold 분할 수
