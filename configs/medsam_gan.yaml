@@ -21,7 +21,7 @@ dataloader:
 
 optimizer:
   g_lr: 0.0001 # Generator 학습률 (SAM parts)
-  d_lr: 0.00002 # Discriminator 학습률 (보통 G보다 낮거나 다르게 설정)
+  d_lr: 0.000005 # Discriminator 학습률 (보통 G보다 낮거나 다르게 설정)
   weight_decay: 0.0001
 
 epochs: 50
