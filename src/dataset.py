@@ -49,21 +49,21 @@ class NpySegDataset(Dataset):
         msk = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
         msk = (msk > 127).astype(np.float32)
         
-        print(f"DEBUG: Image path: {img_path}")
-        print(f"DEBUG: Mask path: {mask_path}")
-        print(f"DEBUG: Loaded Image shape: {img.shape}, dtype: {img.dtype}, min: {img.min()}, max: {img.max()}")
-        print(f"DEBUG: Loaded Mask shape: {msk.shape}, dtype: {msk.dtype}, unique values: {np.unique(msk)}")
+        # print(f"DEBUG: Image path: {img_path}")
+        # print(f"DEBUG: Mask path: {mask_path}")
+        # print(f"DEBUG: Loaded Image shape: {img.shape}, dtype: {img.dtype}, min: {img.min()}, max: {img.max()}")
+        # print(f"DEBUG: Loaded Mask shape: {msk.shape}, dtype: {msk.dtype}, unique values: {np.unique(msk)}")
 
-        # 이미지와 마스크를 시각화하여 실제 데이터를 확인 (주피터 노트북에서 실행 시 유용)
-        import matplotlib.pyplot as plt
-        plt.figure(figsize=(10, 5))
-        plt.subplot(1, 2, 1)
-        plt.imshow(img[0] if img.ndim == 3 else img, cmap='gray') # 3D인 경우 첫 채널 시각화
-        plt.title('Loaded Image')
-        plt.subplot(1, 2, 2)
-        plt.imshow(msk, cmap='gray')
-        plt.title('Loaded Mask (binary)')
-        plt.show()
+        # # 이미지와 마스크를 시각화하여 실제 데이터를 확인 (주피터 노트북에서 실행 시 유용)
+        # import matplotlib.pyplot as plt
+        # plt.figure(figsize=(10, 5))
+        # plt.subplot(1, 2, 1)
+        # plt.imshow(img[0] if img.ndim == 3 else img, cmap='gray') # 3D인 경우 첫 채널 시각화
+        # plt.title('Loaded Image')
+        # plt.subplot(1, 2, 2)
+        # plt.imshow(msk, cmap='gray')
+        # plt.title('Loaded Mask (binary)')
+        # plt.show()
 
         img, msk = img[...,None], msk[...,None] # Add channel dimension for Albumentations
 
