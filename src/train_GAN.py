@@ -13,6 +13,7 @@ from datetime import datetime
 from sklearn.model_selection import KFold
 import shutil
 import glob
+import inspect # ⭐ 추가: 함수의 시그니처를 검사하기 위해 필요
 
 # For AMP (Automatic Mixed Precision) - ⭐ 수정: FutureWarning 해결을 위해 'cuda' 명시
 from torch.amp import GradScaler, autocast
@@ -115,7 +116,8 @@ def train_one_epoch(
             # ⭐ 수정: autocast 사용법 변경
             with autocast(device_type='cuda', enabled=scaler_D is not None): 
                 # 1. 실제 마스크에 대한 Discriminator 출력 (D(real_samples))
-                # real_low_res_mask가 있을 때 MedSAM_GAN.forward의 반환 값 변경
+                # MedSAM_GAN.forward는 (생성된 마스크_1024, iou_predictions, discriminator_output_for_generated_mask, low_res_masks_256, discriminator_output_for_real_mask)를 반환
+                # ⭐ 수정: real_low_res_mask 인자를 키워드로 명시
                 _, _, _, _, discriminator_output_for_real_mask = model(images, real_low_res_mask=real_low_res_masks)
                 
                 # 2. Generator (SAM)를 통해 가짜 마스크 생성 (D 학습 시 G는 고정)
@@ -290,6 +292,7 @@ def run_training_pipeline(cfg: OmegaConf):
         train_files = sorted([f for f in os.listdir(train_img_base) if f.endswith('.npy')])
         for f in train_files:
             all_image_full_paths.append(os.path.join(train_img_base, f))
+            # 마스크 파일은 .npy 확장자를 .png로 대체하여 매칭합니다.
             all_mask_full_paths.append(os.path.join(train_mask_base, f.replace('.npy','.png')))
     
     val_img_base = os.path.join(cfg.data.data_dir, 'val', 'images')
@@ -367,6 +370,8 @@ def run_training_pipeline(cfg: OmegaConf):
         ).to(device)
 
         if fold == 0:
+            # ⭐ 디버그 추가: MedSAM_GAN.forward의 실제 시그니처 출력
+            print(f"DEBUG: Actual MedSAM_GAN.forward signature: {inspect.signature(model.forward)}")
             total_trainable_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
             print(f"Model has {total_trainable_parameters:,} trainable parameters.")
 
@@ -548,7 +553,7 @@ def run_training_pipeline(cfg: OmegaConf):
 
     print("\n--- Independent Test Set Evaluation ---")
     test_img_base = os.path.join(cfg.data.data_dir, 'test', 'images')
-    test_mask_base = os.path.join(cfg.data.data_dir, 'test', 'masks')
+    test_mask_base = os.path.join(cfg.data.data.dir, 'test', 'masks')
 
     test_files = sorted([f for f in os.listdir(test_img_base) if f.endswith('.npy')])
     test_image_paths = [os.path.join(test_img_base, f) for f in test_files]

@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from segment_anything.build_sam import sam_model_registry
 import segmentation_models_pytorch as smp
 from typing import Optional
+import os
 
 # --- 1. Discriminator 네트워크 정의 ---
 class MaskDiscriminator(nn.Module):
@@ -184,4 +185,3 @@ class MedSAM_GAN(nn.Module):
         
         # 반환 값 순서: (Generator 생성 마스크, IoU 예측, 생성 마스크에 대한 D 출력, 저해상도 마스크, 실제 마스크에 대한 D 출력)
         return masks_1024_gen, iou_predictions_gen, discriminator_output_for_generated_mask, low_res_masks_256_gen, discriminator_output_for_real_mask
-
