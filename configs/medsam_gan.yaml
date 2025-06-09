@@ -26,9 +26,22 @@ optimizer:
   d_lr: 0.000005 # Discriminator 학습률 (이전 시도들을 기반으로 재조정)
   weight_decay: 0.0001
   max_grad_norm: 1.0
-  d_update_interval: 3 # ⭐ 새로 추가: Discriminator를 Generator의 2배 느리게 업데이트 (2배 배치마다 1회 업데이트). 
-                       #              1로 설정하면 매 배치 업데이트, 2는 2배 느리게, 3은 3배 느리게.
-                       #              Discriminator가 너무 강하다면 이 값을 2, 3 등으로 늘려보세요.
+  d_update_interval: 3 # Discriminator를 Generator의 2배 느리게 업데이트 (2배 배치마다 1회 업데이트). 
+                       # 1로 설정하면 매 배치 업데이트, 2는 2배 느리게, 3은 3배 느리게.
+                       # Discriminator가 너무 강하다면 이 값을 2, 3 등으로 늘려보세요.
+
+losses:
+  segmentation_weight: 1.0 # DiceFocalLoss의 가중치
+  adversarial_weight: 0.005 # Generator 손실에서 Adversarial Loss의 가중치
+  lambda_gp: 10.0 # WGAN-GP Gradient Penalty 가중치
+
+  # ⭐ 추가: DiceFocalLoss 및 FocalLoss 내부 파라미터
+  dice_focal_loss_weights:
+    w_dice: 0.5 # Dice Loss 가중치
+    w_focal: 0.5 # Focal Loss 가중치
+  focal_loss_params:
+    alpha: 0.8 # Focal Loss의 alpha (클래스 불균형 조절)
+    gamma: 2.0 # Focal Loss의 gamma (쉬운 샘플의 손실 감소)
 
 epochs: 100 # 전체 학습 에폭 수
 early_stopping_patience: 15 # Val Dice 개선 없을 시 학습 조기 종료까지 기다릴 에폭 수
@@ -38,9 +51,6 @@ seed: 42 # 난수 시드 (재현성 확보)
 gpu: 0 # 사용할 GPU 번호 (0부터 시작)
 
 output_dir: outputs # 학습 결과 및 모델 저장 최상위 디렉토리
-
-# GAN 관련 하이퍼파라미터
-gan_lambda_adv: 0.0005 # Generator 손실에서 Adversarial Loss의 가중치 (이전 시도들을 기반으로 유지)
 
 kfold:
   n_splits: 5 # K-Fold 분할 수
