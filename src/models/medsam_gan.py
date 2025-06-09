@@ -96,6 +96,8 @@ class MedSAM_GAN(nn.Module):
             discriminator_output_for_generated_mask (torch.Tensor): 생성된 마스크에 대한 Discriminator의 판별 결과.
                                                                     Generator의 adversarial loss 계산에 사용.
                                                                     (B, 1, H_D, W_D)
+            low_res_masks (torch.Tensor): SAM Mask Decoder에서 출력된 256x256 저해상도 마스크.
+                                          Discriminator에 입력하기 위해 직접 사용될 수 있습니다.
             discriminator_output_for_real_mask (torch.Tensor, optional): 실제 마스크에 대한 Discriminator의 판별 결과.
                                                                          Discriminator의 loss 계산에 사용.
                                                                          real_low_res_mask가 제공될 때만 반환.
@@ -154,7 +156,7 @@ class MedSAM_GAN(nn.Module):
         discriminator_output_for_generated_mask = self.discriminator(discriminator_input_for_generated)
 
         # Step 8: 예측 마스크를 원본 이미지 크기로 업샘플링하여 최종 결과 생성
-        masks = F.interpolate(
+        masks_upsampled = F.interpolate( # ⭐ 변수명 변경: 'masks' 대신 'masks_upsampled'
             low_res_masks, size=original_image_size, mode='bilinear', align_corners=False
         )
 
@@ -165,8 +167,10 @@ class MedSAM_GAN(nn.Module):
             # Discriminator 입력: [리사이즈된 원본 이미지(RGB), 실제 마스크(1채널)]
             discriminator_input_for_real = torch.cat([resized_image_rgb_for_D, real_low_res_mask], dim=1)
             discriminator_output_for_real_mask = self.discriminator(discriminator_input_for_real)
-            return masks, iou_predictions, discriminator_output_for_generated_mask, discriminator_output_for_real_mask
+            # ⭐ 반환 값에 low_res_masks(256x256) 추가
+            return masks_upsampled, iou_predictions, discriminator_output_for_generated_mask, low_res_masks, discriminator_output_for_real_mask
         else:
             # Generator 학습 시에는 생성된 마스크에 대한 판별 결과만 반환
-            return masks, iou_predictions, discriminator_output_for_generated_mask
+            # ⭐ 반환 값에 low_res_masks(256x256) 추가
+            return masks_upsampled, iou_predictions, discriminator_output_for_generated_mask, low_res_masks
 
