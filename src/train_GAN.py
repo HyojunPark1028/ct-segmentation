@@ -120,7 +120,8 @@ def train_one_epoch(
                 # 2. Generator (SAM)를 통해 가짜 마스크 생성 (D 학습 시 G는 고정)
                 # model.forward는 (생성된 마스크, iou_predictions, discriminator_output_for_generated_mask)를 반환
                 # D 학습 시에는 real_low_res_mask를 None으로 전달하여 G가 생성한 마스크만 Discriminator에 입력
-                low_res_masks_from_G, _, discriminator_output_for_generated_mask_for_D_input = model(images, None, real_low_res_mask=None)
+                # ⭐ 수정: positional argument 'None' 제거
+                low_res_masks_from_G, _, discriminator_output_for_generated_mask_for_D_input = model(images, real_low_res_mask=None)
                 
                 # 3. 가짜 마스크에 대한 Discriminator 입력 구성 (D(fake_samples))
                 # WGAN-GP의 GP 계산을 위해 필요한 'fake_samples'는 G가 생성한 마스크와 이미지의 결합 텐서임.
@@ -159,7 +160,8 @@ def train_one_epoch(
 
         with autocast(enabled=scaler_G is not None): # AMP 사용 여부 확인
             # Generator를 통해 마스크를 생성하고, 이에 대한 Discriminator의 출력을 받습니다.
-            gen_masks, iou_predictions, discriminator_output_for_generated_mask_for_G = model(images, None, real_low_res_mask=None)
+            # ⭐ 수정: positional argument 'None' 제거
+            gen_masks, iou_predictions, discriminator_output_for_generated_mask_for_G = model(images, real_low_res_mask=None)
 
             # Segmentation Loss를 계산합니다. (생성된 마스크와 실제 마스크 간의 유사도)
             seg_loss = seg_criterion(gen_masks, masks)
@@ -236,7 +238,8 @@ def validate_one_epoch(
             torch.cuda.synchronize() 
             start_inference = time.time()
 
-            predicted_masks, _, _ = model(images, None, real_low_res_mask=None) 
+            # ⭐ 수정: positional argument 'None' 제거
+            predicted_masks, _, _ = model(images, real_low_res_mask=None) 
             
             torch.cuda.synchronize()
             end_inference = time.time()
@@ -538,7 +541,7 @@ def run_training_pipeline(cfg: OmegaConf):
 
     print("\n--- Independent Test Set Evaluation ---")
     test_img_base = os.path.join(cfg.data.data_dir, 'test', 'images')
-    test_mask_base = os.path.join(cfg.data.data_dir, 'test', 'masks')
+    test_mask_base = os.path.join(cfg.data.data.dir, 'test', 'masks')
 
     test_files = sorted([f for f in os.listdir(test_img_base) if f.endswith('.npy')])
     test_image_paths = [os.path.join(test_img_base, f) for f in test_files]
@@ -586,7 +589,8 @@ def run_training_pipeline(cfg: OmegaConf):
                 
                 torch.cuda.synchronize()
                 start_inference = time.time()
-                predicted_masks_test, _, _ = final_model(x_test, None, real_low_res_mask=None)
+                # ⭐ 수정: positional argument 'None' 제거
+                predicted_masks_test, _, _ = final_model(x_test, real_low_res_mask=None)
                 torch.cuda.synchronize()
                 end_inference = time.time()
                 test_inference_times.append(end_inference - start_inference)
@@ -630,4 +634,3 @@ def run_training_pipeline(cfg: OmegaConf):
 
     total_elapsed = time.time() - start_time
     print(f"\nTotal cross-validation and test process time: {total_elapsed/60:.2f} minutes")
-
