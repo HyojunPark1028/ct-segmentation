@@ -126,6 +126,9 @@ def train_one_epoch(
                 # 3. 가짜 마스크에 대한 Discriminator 입력 구성 (D(fake_samples))
                 # WGAN-GP의 GP 계산을 위해 필요한 'fake_samples'는 G가 생성한 마스크와 이미지의 결합 텐서임.
                 disc_input_for_generated = torch.cat([resized_image_rgb_for_D, low_res_masks_256.detach()], dim=1) # detach() 필수
+
+                # ⭐ 추가: Discriminator의 GP 계산을 위한 '진짜' 샘플 입력 구성
+                discriminator_input_for_real = torch.cat([resized_image_rgb_for_D, real_low_res_masks], dim=1)
                 
                 # WGAN-GP Discriminator 손실 계산 (pred_real, pred_fake, real_samples, fake_samples, discriminator_model)
                 d_loss = adv_criterion_D(
