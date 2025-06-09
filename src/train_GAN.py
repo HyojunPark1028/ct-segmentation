@@ -123,22 +123,22 @@ def train_one_epoch(
                 # 2. Generator (SAM)를 통해 가짜 마스크 생성 (D 학습 시 G는 고정)
                 # model.forward는 (생성된 마스크_1024, iou_predictions, discriminator_output_for_generated_mask, low_res_masks_256)를 반환
                 # ⭐ 수정: real_low_res_mask 인자를 키워드로 명시
-                final_masks_1024, _, discriminator_output_for_generated_mask_for_D_input, low_res_masks_256 = model(images, real_low_res_mask=None)
+                final_masks_1024, _, discriminator_output_for_generated_mask_for_D_input, low_res_masks_256_gen = model(images, real_low_res_mask=None) #
                 
                 # 3. 가짜 마스크에 대한 Discriminator 입력 구성 (D(fake_samples))
                 # WGAN-GP의 GP 계산을 위해 필요한 'fake_samples'는 G가 생성한 마스크와 이미지의 결합 텐서임.
-                disc_input_for_generated = torch.cat([resized_image_rgb_for_D, low_res_masks_256.detach()], dim=1) # detach() 필수
+                disc_input_for_generated = torch.cat([resized_image_rgb_for_D, low_res_masks_256_gen.detach()], dim=1) # detach() 필수
 
                 # ⭐ 추가: Discriminator의 GP 계산을 위한 '진짜' 샘플 입력 구성
                 discriminator_input_for_real = torch.cat([resized_image_rgb_for_D, real_low_res_masks], dim=1)
                 
                 # WGAN-GP Discriminator 손실 계산 (pred_real, pred_fake, real_samples, fake_samples, discriminator_model)
                 d_loss = adv_criterion_D(
-                    discriminator_output_for_real_mask,             # D(real_samples)
+                    discriminator_output_for_real_mask,          # D(real_samples)
                     discriminator_output_for_generated_mask_for_D_input, # D(fake_samples)
-                    discriminator_input_for_real.detach(),          # Real samples (for GP)
-                    disc_input_for_generated.detach(),              # Fake samples (for GP)
-                    model.discriminator                             # Discriminator model (for GP)
+                    discriminator_input_for_real.detach(),       # Real samples (for GP)
+                    disc_input_for_generated.detach(),           # Fake samples (for GP)
+                    model.discriminator                          # Discriminator model (for GP)
                 )
 
             if scaler_D is not None:
@@ -247,7 +247,7 @@ def validate_one_epoch(
 
             # MedSAM_GAN.forward는 (생성된 마스크_1024, iou_predictions, discriminator_output_for_generated_mask, low_res_masks_256)를 반환
             # ⭐ 수정: real_low_res_mask 인자를 키워드로 명시
-            predicted_masks, _, _, _ = model(images, real_low_res_mask=None) 
+            predicted_masks, _, _, _ = model(images, real_low_res_mask=None)
             
             torch.cuda.synchronize()
             end_inference = time.time()
@@ -553,7 +553,7 @@ def run_training_pipeline(cfg: OmegaConf):
 
     print("\n--- Independent Test Set Evaluation ---")
     test_img_base = os.path.join(cfg.data.data_dir, 'test', 'images')
-    test_mask_base = os.path.join(cfg.data.data.dir, 'test', 'masks')
+    test_mask_base = os.path.join(cfg.data.data_dir, 'test', 'masks') # ⭐수정: cfg.data.data.dir -> cfg.data.data_dir
 
     test_files = sorted([f for f in os.listdir(test_img_base) if f.endswith('.npy')])
     test_image_paths = [os.path.join(test_img_base, f) for f in test_files]
