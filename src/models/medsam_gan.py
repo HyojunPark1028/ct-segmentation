@@ -1,8 +1,11 @@
+# src/models/medsam_gan.py
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from segment_anything.build_sam import sam_model_registry
 import segmentation_models_pytorch as smp
+from typing import Optional
 
 # --- 1. Discriminator 네트워크 정의 ---
 class MaskDiscriminator(nn.Module):
@@ -28,150 +31,157 @@ class MaskDiscriminator(nn.Module):
             nn.BatchNorm2d(256),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(256, 512, kernel_size=4, stride=1, padding=1), # Output: (B, 512, 31, 31)
+            nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1), # Output: (B, 512, 16, 16)
             nn.BatchNorm2d(512),
             nn.LeakyReLU(0.2, inplace=True),
 
-            nn.Conv2d(512, 1, kernel_size=4, stride=1, padding=1) # Output: (B, 1, 30, 30) - 'realness' map
+            nn.Conv2d(512, 1, kernel_size=4, stride=1, padding=1) # Output: (B, 1, 15, 15)
         )
 
-    def forward(self, x: torch.Tensor):
-        """
-        Discriminator의 forward pass.
-        Args:
-            x (torch.Tensor): 이미지와 마스크가 채널 방향으로 합쳐진 텐서.
-                              (B, in_channels, H, W)
-        Returns:
-            torch.Tensor: 각 패치의 '진위' 점수를 나타내는 텐서.
-                          (B, 1, H_D, W_D)
-        """
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.net(x)
 
-# --- 2. MedSAM 모델에 GAN 통합 ---
-class MedSAM_GAN(nn.Module):
-    def __init__(self, sam_checkpoint: str, unet_checkpoint: str, out_channels: int = 1):
+# --- 2. U-Net 모델 정의 (Segmentation_models_pytorch 라이브러리 사용) ---
+class CustomUNet(nn.Module):
+    def __init__(self, encoder_name="resnet34", encoder_weights="imagenet", in_channels=1, classes=1):
         super().__init__()
-        # SAM 모델 초기화 (Generator 역할)
-        self.sam = sam_model_registry["vit_b"](checkpoint=sam_checkpoint)
-
-        # SAM의 image encoder, prompt encoder, mask decoder 파라미터 학습 활성화
-        # (이들이 GAN의 Generator 역할을 수행하며, Discriminator의 피드백을 받음)
-        for p in self.sam.image_encoder.parameters():
-            p.requires_grad = True
-        for p in self.sam.prompt_encoder.parameters():
-            p.requires_grad = True
-        for p in self.sam.mask_decoder.parameters():
-            p.requires_grad = True
-
-        # U-Net 모델 초기화 (초기 프롬프트 생성용, 학습 불필요)
-        self.unet = smp.Unet(
-            encoder_name="resnet34",
-            encoder_weights=None,  # ImageNet 사전 학습 가중치 사용 안 함
-            in_channels=1,
-            classes=1,
-            activation=None
-        )
-        # U-Net 체크포인트 로드 및 파라미터 고정
-        state_dict = torch.load(unet_checkpoint, map_location="cpu", weights_only=False)
-        new_state_dict = {k.replace("model.", ""): v for k, v in state_dict.items()}
-        self.unet.load_state_dict(new_state_dict)
-        self.unet.eval() # 평가 모드 유지
-        for p in self.unet.parameters():
-            p.requires_grad = False # U-Net 파라미터 고정
-
-        # GAN Discriminator 초기화
-        # Discriminator는 리사이즈된 원본 이미지(3채널)와 생성된 마스크(1채널)를 입력받으므로 4채널
-        self.discriminator = MaskDiscriminator(in_channels=4)
-
-    # ⭐ 수정: `real_low_res_mask`를 키워드 전용 인자로 강제
-    def forward(self, image: torch.Tensor, *, real_low_res_mask: torch.Tensor = None):
-        """
-        MedSAM_GAN 모델의 forward pass.
-        Args:
-            image (torch.Tensor): 입력 이미지 텐서 (B, 1 or 3, H, W).
-            real_low_res_mask (torch.Tensor, optional): 실제 Ground Truth 마스크 텐서 (B, 1, 256, 256).
-                                                        Discriminator 학습 시 필요하며, Generator 학습 시에는 None.
-                                                        ⭐ 이 인자는 반드시 키워드(real_low_res_mask=...)로만 전달해야 합니다.
-        Returns:
-            masks_upsampled (torch.Tensor): 원본 이미지 크기로 업샘플링된 최종 예측 마스크 (B, 1, H, W).
-            iou_predictions (torch.Tensor): SAM의 IOU 예측 값 (B, 1).
-            discriminator_output_for_generated_mask (torch.Tensor): 생성된 마스크에 대한 Discriminator의 판별 결과.
-                                                                    Generator의 adversarial loss 계산에 사용.
-                                                                    (B, 1, H_D, W_D)
-            low_res_masks (torch.Tensor): SAM Mask Decoder에서 출력된 256x256 저해상도 마스크.
-                                          Discriminator에 입력하기 위해 직접 사용될 수 있습니다.
-            discriminator_output_for_real_mask (torch.Tensor, optional): 실제 마스크에 대한 Discriminator의 판별 결과.
-                                                                         Discriminator의 loss 계산에 사용.
-                                                                         real_low_res_mask가 제공될 때만 반환.
-        """
-        B = image.shape[0]
-        original_image_size = image.shape[2:]
-
-        # Step 1: CT 이미지가 1채널이면 3채널로 복제
-        if image.shape[1] == 1:
-            image_rgb = image.repeat(1, 3, 1, 1)  # (B, 3, H, W)
-        else:
-            image_rgb = image
-
-        # Discriminator 입력으로 사용하기 위해 image_rgb를 256x256으로 리사이즈
-        # cGAN에서 이미지와 마스크를 함께 Discriminator에 입력하는 일반적인 방법
-        resized_image_rgb_for_D = F.interpolate(
-            image_rgb, size=(256, 256), mode='bilinear', align_corners=False
+        self.model = smp.Unet(
+            encoder_name=encoder_name,
+            encoder_weights=encoder_weights,
+            in_channels=in_channels,
+            classes=classes,
+            activation=None # 활성화 함수는 나중에 손실 함수에서 적용
         )
 
-        # Step 2: U-Net을 통한 초기 마스크 예측 → SAM prompt 용도
-        # U-Net은 no_grad()로 고정되어 있으므로 추론만 수행
-        with torch.no_grad():
-            initial_mask = self.unet(image)  # (B, 1, H, W), 원본 크기
-            initial_mask_bin = (initial_mask > 0.5).float() # 이진 마스크로 변환
+    def forward(self, x):
+        return self.model(x)
 
-        # 프롬프트 마스크를 SAM이 요구하는 256x256 크기로 리사이즈
-        resized_prompt_mask = F.interpolate(
-            initial_mask_bin, size=(256, 256), mode='bilinear', align_corners=False
+# --- 3. MedSAM 모델 정의 (SAM Backbone + UNet Decoder) ---
+class MedSAM(nn.Module):
+    """
+    MedSAM 모델: SAM의 이미지 인코더에 UNet 디코더를 연결한 구조.
+    """
+    def __init__(self, checkpoint, model_type, output_channels=1, unet_checkpoint=None):
+        super().__init__()
+        # SAM 모델 로드
+        self.sam = sam_model_registry[model_type](checkpoint=checkpoint)
+        self.image_encoder = self.sam.image_encoder
+        self.prompt_encoder = self.sam.prompt_encoder
+        self.mask_decoder = self.sam.mask_decoder # SAM의 원래 마스크 디코더 사용
+
+        # UNet 디코더 (GAN 학습에서 Generator의 초기 출력 개선에 사용될 수 있음)
+        # 현재 코드에서는 SAM의 마스크 디코더를 직접 사용하고 있어, UNet은 다른 용도 (예: 초기 세그멘테이션)로 활용될 수 있음.
+        # 여기서는 MedSAM_GAN 클래스에서 SAM의 마스크 디코더와 연계하여 사용될 예정.
+        self.unet_decoder = CustomUNet(in_channels=3, classes=output_channels) # 이미지 인코더의 3채널 출력을 가정
+
+        # UNet 체크포인트 로드 (선택 사항)
+        if unet_checkpoint:
+            if not os.path.exists(unet_checkpoint):
+                raise FileNotFoundError(f"UNet checkpoint not found: {unet_checkpoint}")
+            
+            # 모델의 state_dict를 불러오기 전에 strict=False를 사용하여 키 불일치를 허용
+            # 현재 UNetDecoder는 CustomUNet으로 변경되었으므로, 해당 클래스의 state_dict 구조에 맞게 로드해야 함.
+            # 일반적으로는 모델 전체의 state_dict를 로드하므로, 아래와 같이 로드
+            try:
+                unet_state_dict = torch.load(unet_checkpoint, map_location='cpu')
+                # 모델 키가 'model.' 접두사를 포함하는 경우 제거
+                new_state_dict = {k.replace('model.', ''): v for k, v in unet_state_dict.items()}
+                
+                # 'model' 키 아래에 UNet의 실제 파라미터가 있는 경우
+                if 'model' in new_state_dict and isinstance(new_state_dict['model'], dict):
+                    self.unet_decoder.model.load_state_dict(new_state_dict['model'], strict=True)
+                else:
+                    self.unet_decoder.load_state_dict(new_state_dict, strict=True) # 기존 방식 시도
+                print(f"Loaded UNet checkpoint from {unet_checkpoint}")
+            except Exception as e:
+                print(f"Error loading UNet checkpoint: {e}")
+                # UNet 로드 실패 시, 메시지를 출력하고 학습은 계속 진행 (초기화된 UNet 사용)
+                pass # UNet 로드에 실패해도 전체 모델 학습이 가능하도록 예외 처리
+
+
+    def forward(self, image: torch.Tensor, prompt_boxes: Optional[torch.Tensor] = None):
+        # MedSAM의 forward는 이미지와 프롬프트 (여기서는 박스)를 받아 마스크를 생성.
+        # 이 함수는 SAM의 인코더-디코더 흐름을 따름.
+
+        # 1. 이미지 인코더 (SAM Image Encoder)
+        image_embedding = self.image_encoder(image)
+
+        # 2. 프롬프트 인코더 (SAM Prompt Encoder)
+        # prompt_boxes가 제공되지 않으면, 이미지 전체를 커버하는 박스 생성
+        if prompt_boxes is None:
+            image_h, image_w = image.shape[-2:]
+            prompt_boxes = torch.tensor([[0, 0, image_w, image_h]], dtype=torch.float, device=image.device).repeat(image.shape[0], 1, 1)
+
+        sparse_embeddings, dense_embeddings = self.prompt_encoder(
+            points=None,
+            boxes=prompt_boxes,
+            masks=None,
         )
 
-        # Step 3: SAM image encoder를 통해 이미지 임베딩 추출
-        image_embeddings = self.sam.image_encoder(image_rgb)  # (B, C, H', W')
-
-        # Step 4: SAM prompt encoder를 통해 프롬프트 임베딩 추출
-        sparse_embeddings, dense_embeddings = self.sam.prompt_encoder(
-            points=None, boxes=None, masks=resized_prompt_mask
-        )
-
-        # Step 5: SAM positional encoding
-        image_pe = self.sam.prompt_encoder.get_dense_pe()  # (1, C, H', W')
-        image_pe = image_pe.expand(B, -1, -1, -1) # 배치 크기에 맞게 확장
-
-        # Step 6: SAM mask decoder (GAN의 Generator 역할)
-        # 저해상도 마스크와 IOU 예측 값을 생성
-        low_res_masks, iou_predictions = self.sam.mask_decoder(
-            image_embeddings=image_embeddings,
-            image_pe=image_pe,
+        # 3. 마스크 디코더 (SAM Mask Decoder)
+        low_res_masks, iou_predictions = self.mask_decoder(
+            image_embeddings=image_embedding,
+            image_pe=self.prompt_encoder.get_dense_pe(), # 이미지 위치 인코딩
             sparse_prompt_embeddings=sparse_embeddings,
             dense_prompt_embeddings=dense_embeddings,
             multimask_output=False # 단일 마스크 출력
         )
 
-        # Step 7: 생성된 저해상도 마스크를 Discriminator에 입력하여 판별 결과 얻기
-        # Discriminator 입력: [리사이즈된 원본 이미지(RGB), 생성된 마스크(1채널)]
-        discriminator_input_for_generated = torch.cat([resized_image_rgb_for_D, low_res_masks], dim=1)
+        # 최종 마스크를 원본 이미지 크기로 업샘플링
+        masks = F.interpolate(
+            low_res_masks, size=image.shape[-2:], mode='bilinear', align_corners=False
+        )
+        
+        return masks, iou_predictions, low_res_masks # (생성된 마스크, iou_예측, 저해상도 마스크)
+
+# --- 4. MedSAM_GAN 통합 모델 정의 ---
+class MedSAM_GAN(nn.Module):
+    def __init__(self, sam_checkpoint, unet_checkpoint, out_channels=1):
+        super().__init__()
+        # MedSAM (Generator 역할)
+        self.sam = MedSAM(
+            checkpoint=sam_checkpoint,
+            model_type="vit_b",
+            output_channels=out_channels,
+            unet_checkpoint=unet_checkpoint
+        )
+        # Discriminator
+        self.discriminator = MaskDiscriminator(in_channels=4) # 3 (RGB image) + 1 (mask) = 4 channels
+
+    # ⭐ 수정: real_low_res_mask를 키워드 전용 인자로 만듭니다.
+    def forward(self, image: torch.Tensor, *, real_low_res_mask: Optional[torch.Tensor] = None):
+        original_image_size = image.shape[-2:] # (H, W)
+
+        # CT 이미지 전처리 및 SAM 인코더 통과 (생략: MedSAM 내부에서 처리)
+
+        # 1. Generator (SAM)를 통해 마스크 생성
+        # MedSAM.forward는 (생성된 마스크_1024, iou_predictions, 저해상도 마스크_256)를 반환
+        # MedSAM은 prompt_boxes를 받으므로, 여기에 이미지 전체를 커버하는 박스 프롬프트 전달
+        image_h, image_w = image.shape[-2:]
+        input_box = torch.tensor([[0, 0, image_w, image_h]], dtype=torch.float, device=image.device).repeat(image.shape[0], 1, 1)
+
+        # self.sam.forward 호출 시 image와 prompt_boxes를 전달
+        masks_1024_gen, iou_predictions_gen, low_res_masks_256_gen = self.sam(image, prompt_boxes=input_box)
+
+
+        # 2. Discriminator 입력용 이미지 준비
+        # CT 1채널 이미지를 Discriminator 입력에 맞게 3채널 RGB처럼 복제
+        resized_image_rgb_for_D = F.interpolate(
+            image.float(), size=(256, 256), mode='bilinear', align_corners=False
+        ).repeat(1, 3, 1, 1)
+
+        # 3. 생성된 저해상도 마스크에 대한 Discriminator 출력
+        # Discriminator 입력: [리사이즈된 원본 이미지(RGB), 생성된 저해상도 마스크(1채널)]
+        discriminator_input_for_generated = torch.cat([resized_image_rgb_for_D, low_res_masks_256_gen], dim=1)
         discriminator_output_for_generated_mask = self.discriminator(discriminator_input_for_generated)
 
-        # Step 8: 예측 마스크를 원본 이미지 크기로 업샘플링하여 최종 결과 생성
-        masks_upsampled = F.interpolate(
-            low_res_masks, size=original_image_size, mode='bilinear', align_corners=False
-        )
-
-        # --- Discriminator 학습을 위한 추가 로직 (real_low_res_mask가 제공될 경우) ---
+        # 4. 실제 마스크에 대한 Discriminator 출력 (real_low_res_mask가 제공될 경우)
         discriminator_output_for_real_mask = None
         if real_low_res_mask is not None:
-            # 실제 마스크를 Discriminator에 입력하여 판별 결과 얻기
-            # Discriminator 입력: [리사이즈된 원본 이미지(RGB), 실제 마스크(1채널)]
+            # Discriminator 입력: [리사이즈된 원본 이미지(RGB), 실제 저해상도 마스크(1채널)]
             discriminator_input_for_real = torch.cat([resized_image_rgb_for_D, real_low_res_mask], dim=1)
             discriminator_output_for_real_mask = self.discriminator(discriminator_input_for_real)
-            # real_low_res_mask가 있을 때는 D 학습에 필요한 모든 출력을 반환
-            return masks_upsampled, iou_predictions, discriminator_output_for_generated_mask, low_res_masks, discriminator_output_for_real_mask
-        else:
-            # real_low_res_mask가 없을 때는 G 학습에 필요한 출력을 반환
-            return masks_upsampled, iou_predictions, discriminator_output_for_generated_mask, low_res_masks
+        
+        # 반환 값 순서: (Generator 생성 마스크, IoU 예측, 생성 마스크에 대한 D 출력, 저해상도 마스크, 실제 마스크에 대한 D 출력)
+        return masks_1024_gen, iou_predictions_gen, discriminator_output_for_generated_mask, low_res_masks_256_gen, discriminator_output_for_real_mask
 
