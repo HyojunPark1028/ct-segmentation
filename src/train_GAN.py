@@ -65,7 +65,7 @@ def train_one_epoch(
     log_interval: int,
     gan_lambda_adv: float = 0.1,
     d_update_interval: int = 1,
-    max_grad_norm: float = None # ⭐ 추가: Gradient Clipping을 위한 최대 노름 값
+    max_grad_norm: float = None
 ) -> tuple[float, float, float, float]:
     """
     GAN 모델의 한 에폭 훈련을 수행합니다.
@@ -305,7 +305,7 @@ def run_training_pipeline(cfg: OmegaConf):
         print(f"\n--- Starting Fold {fold + 1}/{cfg.kfold.n_splits} ---")
 
         # 각 폴드의 결과를 저장할 서브 디렉토리를 생성합니다.
-        fold_save_dir = os.path.join(output_dir, f"fold_{fold+1}") # ⭐ 수정: os.path.join으로 변경
+        fold_save_dir = os.path.join(output_dir, f"fold_{fold+1}")
         os.makedirs(fold_save_dir, exist_ok=True)
 
         # 현재 폴드에 해당하는 훈련 및 검증 파일의 전체 경로 리스트를 생성합니다.
@@ -336,9 +336,9 @@ def run_training_pipeline(cfg: OmegaConf):
 
         # 훈련 및 검증 DataLoader를 생성합니다.
         train_dl = DataLoader(train_ds, batch_size=cfg.dataloader.batch_size, shuffle=True,
-                               num_workers=cfg.dataloader.num_workers, pin_memory=True, generator=g)
+                              num_workers=cfg.dataloader.num_workers, pin_memory=True, generator=g)
         val_dl = DataLoader(val_ds, batch_size=cfg.dataloader.batch_size, shuffle=False,
-                               num_workers=cfg.dataloader.num_workers, pin_memory=True)
+                            num_workers=cfg.dataloader.num_workers, pin_memory=True)
 
         # 매 폴드마다 새로운 MedSAM_GAN 모델 인스턴스를 초기화합니다.
         model = MedSAM_GAN(
@@ -462,7 +462,8 @@ def run_training_pipeline(cfg: OmegaConf):
                 unet_checkpoint=cfg.model.unet_checkpoint,
                 out_channels=cfg.model.out_channels
             ).to(device)
-            checkpoint = torch.load(best_model_path_this_fold, map_location=device)
+            # weights_only=False 추가
+            checkpoint = torch.load(best_model_path_this_fold, map_location=device, weights_only=False)
             model_eval.sam.load_state_dict(checkpoint['model_G_state_dict'])
             model_eval.discriminator.load_state_dict(checkpoint['model_D_state_dict'])
             model_eval.eval() # 평가 모드 설정
@@ -483,7 +484,7 @@ def run_training_pipeline(cfg: OmegaConf):
             'best_model_val_iou': final_fold_metrics.get('iou_score', -1.0),
             'val_mask_coverage_gt_pixels': coverage_stats_val['gt_pixels'].item() if isinstance(coverage_stats_val['gt_pixels'], torch.Tensor) else coverage_stats_val['gt_pixels'],
             'val_mask_coverage_pred_pixels': coverage_stats_val['pred_pixels'].item() if isinstance(coverage_stats_val['pred_pixels'], torch.Tensor) else coverage_stats_val['pred_pixels'],
-            'val_mask_coverage_intersection': coverage_stats_val['intersection'].item() if isinstance(coverage_stats_val['intersection'], torch.Tensor) else coverage_stats_val['intersection'],
+            "inter_total": coverage_stats['intersection'].item() if isinstance(coverage_stats['intersection'], torch.Tensor) else coverage_stats['intersection'],
             'val_mask_coverage_coverage': coverage_stats_val['coverage'],
             'val_mask_coverage_overpredict': coverage_stats_val['overpredict'],
             'val_inference_time_per_batch_sec': val_metrics_dict.get('val_inference_time_per_batch_sec', 0.0)
@@ -564,7 +565,8 @@ def run_training_pipeline(cfg: OmegaConf):
             
             if os.path.exists(best_model_path_for_test):
                 # Generator와 Discriminator의 state_dict를 각각 로드합니다.
-                checkpoint = torch.load(best_model_path_for_test, map_location=device)
+                # weights_only=False 추가
+                checkpoint = torch.load(best_model_path_for_test, map_location=device, weights_only=False)
                 final_model.sam.load_state_dict(checkpoint['model_G_state_dict'])
                 final_model.discriminator.load_state_dict(checkpoint['model_D_state_dict'])
                 print(f"Loaded best performing model from Fold {best_fold_num} ({best_model_path_for_test}) for final test evaluation.")
@@ -638,7 +640,7 @@ def run_training_pipeline(cfg: OmegaConf):
             "test_inference_time_per_batch_sec": round(avg_test_inference_time_per_batch, 6),
             "param_count": total_trainable_parameters, # K-Fold에서 계산된 총 파라미터 수 포함
             "gt_total": coverage_stats['gt_pixels'].item() if isinstance(coverage_stats['gt_pixels'], torch.Tensor) else coverage_stats['gt_pixels'],
-            "pred_total": coverage_stats['pred_pixels'].item() if isinstance(coverage_stats['pred_pixels'], torch.Tensor) else coverage_stats['pred_pixels'], # ⭐ 오타 수정: coverage_cats -> coverage_stats
+            "pred_total": coverage_stats['pred_pixels'].item() if isinstance(coverage_stats['pred_pixels'], torch.Tensor) else coverage_stats['pred_pixels'],
             "inter_total": coverage_stats['intersection'].item() if isinstance(coverage_stats['intersection'], torch.Tensor) else coverage_stats['intersection'],
             "mask_coverage_ratio": coverage_stats['coverage']
         }
