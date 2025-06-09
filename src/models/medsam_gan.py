@@ -73,26 +73,24 @@ class MedSAM(nn.Module):
         # UNet 디코더 (GAN 학습에서 Generator의 초기 출력 개선에 사용될 수 있음)
         # 현재 코드에서는 SAM의 마스크 디코더를 직접 사용하고 있어, UNet은 다른 용도 (예: 초기 세그멘테이션)로 활용될 수 있음.
         # 여기서는 MedSAM_GAN 클래스에서 SAM의 마스크 디코더와 연계하여 사용될 예정.
-        self.unet_decoder = CustomUNet(in_channels=3, classes=output_channels) # 이미지 인코더의 3채널 출력을 가정
+        # in_channels는 1 (CT 이미지 채널)로 변경합니다.
+        self.unet_decoder = CustomUNet(in_channels=1, classes=output_channels) 
 
         # UNet 체크포인트 로드 (선택 사항)
         if unet_checkpoint:
             if not os.path.exists(unet_checkpoint):
                 raise FileNotFoundError(f"UNet checkpoint not found: {unet_checkpoint}")
             
-            # 모델의 state_dict를 불러오기 전에 strict=False를 사용하여 키 불일치를 허용
-            # 현재 UNetDecoder는 CustomUNet으로 변경되었으므로, 해당 클래스의 state_dict 구조에 맞게 로드해야 함.
-            # 일반적으로는 모델 전체의 state_dict를 로드하므로, 아래와 같이 로드
             try:
                 unet_state_dict = torch.load(unet_checkpoint, map_location='cpu')
-                # 모델 키가 'model.' 접두사를 포함하는 경우 제거
+                
+                # ⭐⭐ 수정: 로드된 state_dict의 키에서 "model." 접두사를 제거합니다. ⭐⭐
                 new_state_dict = {k.replace('model.', ''): v for k, v in unet_state_dict.items()}
                 
-                # 'model' 키 아래에 UNet의 실제 파라미터가 있는 경우
-                if 'model' in new_state_dict and isinstance(new_state_dict['model'], dict):
-                    self.unet_decoder.model.load_state_dict(new_state_dict['model'], strict=True)
-                else:
-                    self.unet_decoder.load_state_dict(new_state_dict, strict=True) # 기존 방식 시도
+                # CustomUNet은 내부에 `self.model`이라는 smp.Unet 인스턴스를 가지고 있습니다.
+                # 따라서 로드된 state_dict를 `self.unet_decoder.model`에 로드해야 합니다.
+                self.unet_decoder.model.load_state_dict(new_state_dict, strict=True)
+                
                 print(f"Loaded UNet checkpoint from {unet_checkpoint}")
             except Exception as e:
                 print(f"Error loading UNet checkpoint: {e}")
@@ -104,13 +102,19 @@ class MedSAM(nn.Module):
         # MedSAM의 forward는 이미지와 프롬프트 (여기서는 박스)를 받아 마스크를 생성.
         # 이 함수는 SAM의 인코더-디코더 흐름을 따름.
 
+        # ⭐⭐ 수정: SAM 이미지 인코더는 3채널을 기대하므로 1채널 이미지를 복제합니다. ⭐⭐
+        if image.shape[1] == 1:
+            image_for_sam_encoder = image.repeat(1, 3, 1, 1) # (B, 3, H, W)
+        else:
+            image_for_sam_encoder = image
+
         # 1. 이미지 인코더 (SAM Image Encoder)
-        image_embedding = self.image_encoder(image)
+        image_embedding = self.image_encoder(image_for_sam_encoder) # 수정된 입력 사용
 
         # 2. 프롬프트 인코더 (SAM Prompt Encoder)
         # prompt_boxes가 제공되지 않으면, 이미지 전체를 커버하는 박스 생성
         if prompt_boxes is None:
-            image_h, image_w = image.shape[-2:]
+            image_h, image_w = image_for_sam_encoder.shape[-2:] # 3채널 이미지의 크기 사용
             prompt_boxes = torch.tensor([[0, 0, image_w, image_h]], dtype=torch.float, device=image.device).repeat(image.shape[0], 1, 1)
 
         sparse_embeddings, dense_embeddings = self.prompt_encoder(
@@ -151,14 +155,14 @@ class MedSAM_GAN(nn.Module):
 
     # ⭐ 수정: real_low_res_mask를 키워드 전용 인자로 만듭니다.
     def forward(self, image: torch.Tensor, *, real_low_res_mask: Optional[torch.Tensor] = None):
-        original_image_size = image.shape[-2:] # (H, W)
+        # original_image_size = image.shape[-2:] # (H, W) # 사용되지 않아 주석 처리
 
-        # CT 이미지 전처리 및 SAM 인코더 통과 (생략: MedSAM 내부에서 처리)
+        # CT 이미지 전처리 및 SAM 인코더 통과 (MedSAM 내부에서 3채널로 변환됨)
 
         # 1. Generator (SAM)를 통해 마스크 생성
         # MedSAM.forward는 (생성된 마스크_1024, iou_predictions, 저해상도 마스크_256)를 반환
         # MedSAM은 prompt_boxes를 받으므로, 여기에 이미지 전체를 커버하는 박스 프롬프트 전달
-        image_h, image_w = image.shape[-2:]
+        image_h, image_w = image.shape[-2:] # 원본 이미지 크기 사용
         input_box = torch.tensor([[0, 0, image_w, image_h]], dtype=torch.float, device=image.device).repeat(image.shape[0], 1, 1)
 
         # self.sam.forward 호출 시 image와 prompt_boxes를 전달
