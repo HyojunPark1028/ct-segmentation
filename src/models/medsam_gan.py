@@ -83,14 +83,15 @@ class MedSAM_GAN(nn.Module):
         # Discriminator는 리사이즈된 원본 이미지(3채널)와 생성된 마스크(1채널)를 입력받으므로 4채널
         self.discriminator = MaskDiscriminator(in_channels=4)
 
-    # ⭐ real_low_res_mask가 키워드 인자임을 명확히 하고, 위치 인자 혼동 방지
-    def forward(self, image: torch.Tensor, real_low_res_mask: torch.Tensor = None):
+    # ⭐ 수정: `real_low_res_mask`를 키워드 전용 인자로 강제
+    def forward(self, image: torch.Tensor, *, real_low_res_mask: torch.Tensor = None):
         """
         MedSAM_GAN 모델의 forward pass.
         Args:
             image (torch.Tensor): 입력 이미지 텐서 (B, 1 or 3, H, W).
             real_low_res_mask (torch.Tensor, optional): 실제 Ground Truth 마스크 텐서 (B, 1, 256, 256).
                                                         Discriminator 학습 시 필요하며, Generator 학습 시에는 None.
+                                                        ⭐ 이 인자는 반드시 키워드(real_low_res_mask=...)로만 전달해야 합니다.
         Returns:
             masks_upsampled (torch.Tensor): 원본 이미지 크기로 업샘플링된 최종 예측 마스크 (B, 1, H, W).
             iou_predictions (torch.Tensor): SAM의 IOU 예측 값 (B, 1).
