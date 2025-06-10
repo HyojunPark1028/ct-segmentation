@@ -114,12 +114,13 @@ def train_one_epoch(
             optimizer_D.zero_grad()
 
             with autocast(device_type='cuda', enabled=scaler_D is not None): 
+                # 1. 실제 마스크에 대한 Discriminator 출력 (D(real_samples))
                 # MedSAM_GAN.forward는 (masks_1024_gen, iou_predictions_gen, discriminator_output_for_generated_mask, low_res_masks_256_gen, discriminator_output_for_real_mask)를 반환
-                # discriminator_output_for_real_mask를 얻기 위해 real_low_res_masks를 전달
+                # ⭐ 수정: `real_low_res_masks`를 키워드 인자로 전달
                 _, _, _, low_res_masks_256_gen, discriminator_output_for_real_mask = model(images, real_low_res_mask=real_low_res_masks)
                 
-                # Generator (SAM)를 통해 가짜 마스크 생성 (D 학습 시 G는 고정)
-                # discriminator_output_for_generated_mask_for_D_input를 얻기 위해 real_low_res_mask=None으로 전달
+                # 2. Generator (SAM)를 통해 가짜 마스크 생성 (D 학습 시 G는 고정)
+                # `real_low_res_mask=None`을 키워드 인자로 전달
                 _, _, discriminator_output_for_generated_mask_for_D_input, _, _ = model(images, real_low_res_mask=None)
                 
                 # WGAN-GP Discriminator 손실 계산 (pred_real, pred_fake, real_samples, fake_samples, discriminator_model)
@@ -589,7 +590,9 @@ def run_training_pipeline(cfg: OmegaConf):
                 
                 torch.cuda.synchronize()
                 start_inference = time.time()
-                # ⭐ 수정: real_low_res_mask 인자를 키워드로 명시
+                # `MedSAM_GAN.forward`는 `image`를 첫 번째 위치 인자로, `real_low_res_mask`를 키워드 인자로 받습니다.
+                # `predicted_masks_test, _, _, _, _ = final_model(x_test, real_low_res_mask=None)`
+                # 이미 이 부분은 올바르게 수정되어 있습니다.
                 predicted_masks_test, _, _, _, _ = final_model(x_test, real_low_res_mask=None)
                 torch.cuda.synchronize()
                 end_inference = time.time()

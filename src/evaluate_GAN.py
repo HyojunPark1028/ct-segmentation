@@ -62,9 +62,10 @@ def evaluate(model, loader, device, thr=0.5, vis=False):
         for k, (x, y) in enumerate(loader):
             x, y = x.to(device), y.to(device)
             
-            # MedSAM_GAN 모델의 forward pass는 (masks, iou_predictions, discriminator_output_for_generated_mask) 반환
-            # validate_one_epoch 및 evaluate 함수는 G의 마스크 출력만 사용
-            predicted_masks, _, _ = model(x, None, real_low_res_mask=None) 
+            # MedSAM_GAN 모델의 forward pass는 (masks, iou_predictions, discriminator_output_for_generated_mask, low_res_masks_256, discriminator_output_for_real_mask) 반환
+            # evaluate 함수는 Generator의 마스크 출력만 사용하며, real_low_res_mask는 필요 없으므로 None으로 전달
+            # ⭐ 수정: `real_low_res_mask=None`을 키워드 인자로 전달
+            predicted_masks, _, _, _, _ = model(x, real_low_res_mask=None) 
             
             # 예측 마스크에 sigmoid 적용 (모델의 출력이 logits인 경우)
             p = torch.sigmoid(predicted_masks) # ⭐ 변경: predicted_masks에 sigmoid 적용
@@ -108,8 +109,9 @@ def compute_mask_coverage(model, loader, device, thr=0.5):
             x, y = x.to(device), y.to(device)
             y = (y > 0.5).float() # 실제 마스크를 명확히 이진화
 
-            # MedSAM_GAN 모델의 forward pass는 (masks, iou_predictions, discriminator_output_for_generated_mask) 반환
-            predicted_masks, _, _ = model(x, None, real_low_res_mask=None) 
+            # MedSAM_GAN 모델의 forward pass는 (masks, iou_predictions, discriminator_output_for_generated_mask, low_res_masks_256, discriminator_output_for_real_mask) 반환
+            # ⭐ 수정: `real_low_res_mask=None`을 키워드 인자로 전달
+            predicted_masks, _, _, _, _ = model(x, real_low_res_mask=None) 
             
             pred = torch.sigmoid(predicted_masks) > thr # ⭐ 변경: predicted_masks에 sigmoid 적용 후 이진화
             
@@ -129,4 +131,3 @@ def compute_mask_coverage(model, loader, device, thr=0.5):
         "coverage": coverage,
         "overpredict": overpredict
     }
-
