@@ -13,9 +13,9 @@ from datetime import datetime
 from sklearn.model_selection import KFold
 import shutil
 import glob
-import inspect # ⭐ 추가: 함수의 시그니처를 검사하기 위해 필요
+import inspect 
 
-# For AMP (Automatic Mixed Precision) - ⭐ 수정: FutureWarning 해결을 위해 'cuda' 명시
+# For AMP (Automatic Mixed Precision)
 from torch.amp import GradScaler, autocast
 
 # 모델 임포트
@@ -113,31 +113,21 @@ def train_one_epoch(
             
             optimizer_D.zero_grad()
 
-            # ⭐ 수정: autocast 사용법 변경
             with autocast(device_type='cuda', enabled=scaler_D is not None): 
-                # 1. 실제 마스크에 대한 Discriminator 출력 (D(real_samples))
-                # MedSAM_GAN.forward는 (생성된 마스크_1024, iou_predictions, discriminator_output_for_generated_mask, low_res_masks_256, discriminator_output_for_real_mask)를 반환
-                # ⭐ 수정: real_low_res_mask 인자를 키워드로 명시
-                _, _, _, _, discriminator_output_for_real_mask = model(images, real_low_res_mask=real_low_res_masks)
+                # MedSAM_GAN.forward는 (masks_1024_gen, iou_predictions_gen, discriminator_output_for_generated_mask, low_res_masks_256_gen, discriminator_output_for_real_mask)를 반환
+                # discriminator_output_for_real_mask를 얻기 위해 real_low_res_masks를 전달
+                _, _, _, low_res_masks_256_gen, discriminator_output_for_real_mask = model(images, real_low_res_mask=real_low_res_masks)
                 
-                # 2. Generator (SAM)를 통해 가짜 마스크 생성 (D 학습 시 G는 고정)
-                # model.forward는 (생성된 마스크_1024, iou_predictions, discriminator_output_for_generated_mask, low_res_masks_256)를 반환
-                # ⭐ 수정: real_low_res_mask 인자를 키워드로 명시
-                final_masks_1024, _, discriminator_output_for_generated_mask_for_D_input, low_res_masks_256_gen = model(images, real_low_res_mask=None) #
-                
-                # 3. 가짜 마스크에 대한 Discriminator 입력 구성 (D(fake_samples))
-                # WGAN-GP의 GP 계산을 위해 필요한 'fake_samples'는 G가 생성한 마스크와 이미지의 결합 텐서임.
-                disc_input_for_generated = torch.cat([resized_image_rgb_for_D, low_res_masks_256_gen.detach()], dim=1) # detach() 필수
-
-                # ⭐ 추가: Discriminator의 GP 계산을 위한 '진짜' 샘플 입력 구성
-                discriminator_input_for_real = torch.cat([resized_image_rgb_for_D, real_low_res_masks], dim=1)
+                # Generator (SAM)를 통해 가짜 마스크 생성 (D 학습 시 G는 고정)
+                # discriminator_output_for_generated_mask_for_D_input를 얻기 위해 real_low_res_mask=None으로 전달
+                _, _, discriminator_output_for_generated_mask_for_D_input, _, _ = model(images, real_low_res_mask=None)
                 
                 # WGAN-GP Discriminator 손실 계산 (pred_real, pred_fake, real_samples, fake_samples, discriminator_model)
                 d_loss = adv_criterion_D(
                     discriminator_output_for_real_mask,          # D(real_samples)
                     discriminator_output_for_generated_mask_for_D_input, # D(fake_samples)
-                    discriminator_input_for_real.detach(),       # Real samples (for GP)
-                    disc_input_for_generated.detach(),           # Fake samples (for GP)
+                    torch.cat([resized_image_rgb_for_D, real_low_res_masks], dim=1).detach(), # Real samples (for GP)
+                    torch.cat([resized_image_rgb_for_D, low_res_masks_256_gen], dim=1).detach(), # Fake samples (for GP)
                     model.discriminator                          # Discriminator model (for GP)
                 )
 
@@ -163,12 +153,10 @@ def train_one_epoch(
 
         optimizer_G.zero_grad()
 
-        # ⭐ 수정: autocast 사용법 변경
         with autocast(device_type='cuda', enabled=scaler_G is not None): 
             # Generator를 통해 마스크를 생성하고, 이에 대한 Discriminator의 출력을 받습니다.
-            # MedSAM_GAN.forward는 (생성된 마스크_1024, iou_predictions, discriminator_output_for_generated_mask, low_res_masks_256)를 반환
-            # ⭐ 수정: real_low_res_mask 인자를 키워드로 명시
-            gen_masks, iou_predictions, discriminator_output_for_generated_mask_for_G, _ = model(images, real_low_res_mask=None)
+            # MedSAM_GAN.forward는 (masks_1024_gen, iou_predictions_gen, discriminator_output_for_generated_mask, low_res_masks_256_gen, discriminator_output_for_real_mask)를 반환
+            gen_masks, iou_predictions, discriminator_output_for_generated_mask_for_G, _, _ = model(images, real_low_res_mask=None)
 
             # Segmentation Loss를 계산합니다. (생성된 마스크와 실제 마스크 간의 유사도)
             seg_loss = seg_criterion(gen_masks, masks)
@@ -245,9 +233,9 @@ def validate_one_epoch(
             torch.cuda.synchronize() 
             start_inference = time.time()
 
-            # MedSAM_GAN.forward는 (생성된 마스크_1024, iou_predictions, discriminator_output_for_generated_mask, low_res_masks_256)를 반환
-            # ⭐ 수정: real_low_res_mask 인자를 키워드로 명시
-            predicted_masks, _, _, _ = model(images, real_low_res_mask=None)
+            # MedSAM_GAN.forward는 (masks_1024_gen, iou_predictions_gen, discriminator_output_for_generated_mask, low_res_masks_256_gen, discriminator_output_for_real_mask)를 반환
+            # validate_one_epoch은 Generator의 출력 (predicted_masks)만 필요
+            predicted_masks, _, _, _, _ = model(images, real_low_res_mask=None)
             
             torch.cuda.synchronize()
             end_inference = time.time()
@@ -553,7 +541,7 @@ def run_training_pipeline(cfg: OmegaConf):
 
     print("\n--- Independent Test Set Evaluation ---")
     test_img_base = os.path.join(cfg.data.data_dir, 'test', 'images')
-    test_mask_base = os.path.join(cfg.data.data_dir, 'test', 'masks') # ⭐수정: cfg.data.data.dir -> cfg.data.data_dir
+    test_mask_base = os.path.join(cfg.data.data_dir, 'test', 'masks')
 
     test_files = sorted([f for f in os.listdir(test_img_base) if f.endswith('.npy')])
     test_image_paths = [os.path.join(test_img_base, f) for f in test_files]
@@ -602,7 +590,7 @@ def run_training_pipeline(cfg: OmegaConf):
                 torch.cuda.synchronize()
                 start_inference = time.time()
                 # ⭐ 수정: real_low_res_mask 인자를 키워드로 명시
-                predicted_masks_test, _, _, _ = final_model(x_test, real_low_res_mask=None)
+                predicted_masks_test, _, _, _, _ = final_model(x_test, real_low_res_mask=None)
                 torch.cuda.synchronize()
                 end_inference = time.time()
                 test_inference_times.append(end_inference - start_inference)
