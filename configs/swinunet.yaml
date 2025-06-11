@@ -13,12 +13,12 @@ data:
 
 train:
   batch_size: 4
-  epochs: 50
+  epochs: 100
   lr: 0.0001
   loss: dice_focal
   save_dir: outputs/swinunet_dice_focal_epoch50_pretrained
   num_workers: 4
-  patience: 10
+  patience: 15
   k_folds: 5
 
 eval:
