@@ -161,7 +161,8 @@ def main(cfg):
             total_trainable_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
             print(f"Model has {total_trainable_parameters:,} trainable parameters.")
 
-        optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr)
+        # optimizer = torch.optim.Adam(model.parameters(), lr=cfg.train.lr)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.train.lr)
         criterion = get_loss()
 
         best_val_dice = -float('inf') # ⭐ Early Stopping 기준을 val_dice로 변경 (높을수록 좋음)
