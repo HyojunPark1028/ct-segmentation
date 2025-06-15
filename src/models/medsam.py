@@ -19,7 +19,7 @@ class MedSAM(nn.Module):
         for p in self.sam.prompt_encoder.parameters():
             p.requires_grad = False
         for p in self.sam.mask_decoder.parameters():
-            p.requires_grad = False
+            p.requires_grad = True
 
         # UNet 모델 초기화 및 가중치 로드
         self.unet = smp.Unet(
