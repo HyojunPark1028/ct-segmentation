@@ -14,12 +14,12 @@ class MedSAM(nn.Module):
 
         # SAM의 학습 가능/불가능 설정
         # (현재는 모두 학습 가능으로 설정되어 있지만, 필요에 따라 image_encoder를 고정할 수 있습니다.)
-        # for p in self.sam.image_encoder.parameters():
-        #     p.requires_grad = True
-        # for p in self.sam.prompt_encoder.parameters():
-        #     p.requires_grad = True
-        # for p in self.sam.mask_decoder.parameters():
-        #     p.requires_grad = True
+        for p in self.sam.image_encoder.parameters():
+            p.requires_grad = False
+        for p in self.sam.prompt_encoder.parameters():
+            p.requires_grad = False
+        for p in self.sam.mask_decoder.parameters():
+            p.requires_grad = False
 
         # UNet 모델 초기화 및 가중치 로드
         self.unet = smp.Unet(
