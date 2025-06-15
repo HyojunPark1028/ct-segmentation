@@ -146,6 +146,8 @@ def train_one_epoch(
                 optimizer_D.step()
 
             total_d_loss += d_loss.item()
+            total_seg_loss += seg_loss.item()
+            total_g_adv_loss += g_adv_loss.item()
 
 
         # --- 2. Generator (G) 학습 단계 ---

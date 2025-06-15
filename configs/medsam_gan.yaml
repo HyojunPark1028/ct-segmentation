@@ -23,16 +23,16 @@ dataloader:
 
 optimizer:
   g_lr: 0.00005 # Generator 학습률 (SAM parts)
-  d_lr: 0.00005 # Discriminator 학습률 (이전 시도들을 기반으로 재조정)
+  d_lr: 0.000001 # Discriminator 학습률 (이전 시도들을 기반으로 재조정)
   weight_decay: 0.0001
   max_grad_norm: 1.0
-  d_update_interval: 1 # Discriminator를 Generator의 2배 느리게 업데이트 (2배 배치마다 1회 업데이트). 
+  d_update_interval: 5 # Discriminator를 Generator의 2배 느리게 업데이트 (2배 배치마다 1회 업데이트). 
                        # 1로 설정하면 매 배치 업데이트, 2는 2배 느리게, 3은 3배 느리게.
                        # Discriminator가 너무 강하다면 이 값을 2, 3 등으로 늘려보세요.
 
 losses:
   segmentation_weight: 1.0 # DiceFocalLoss의 가중치
-  adversarial_weight: 0.1 # Generator 손실에서 Adversarial Loss의 가중치
+  adversarial_weight: 0.005 # Generator 손실에서 Adversarial Loss의 가중치
   lambda_gp: 10.0 # WGAN-GP Gradient Penalty 가중치
 
   # ⭐ 추가: DiceFocalLoss 및 FocalLoss 내부 파라미터
