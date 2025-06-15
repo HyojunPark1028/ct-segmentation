@@ -11,7 +11,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from datetime import datetime
 from sklearn.model_selection import KFold
-from torch.cuda.amp import autocast, GradScaler
+from torch.amp import GradScaler, autocast
 import shutil
 
 # 모델 임포트
@@ -217,6 +217,7 @@ def main(cfg):
                 # ⭐ Gradient Clipping 적용
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 scaler.step(optimizer)
+                scaler.update()
                 train_loss += loss.item()
                 
                 # 훈련 중 현재 배치에 대한 평균 예측값 로깅
