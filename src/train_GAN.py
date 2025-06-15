@@ -173,6 +173,9 @@ def train_one_epoch(
 
         if scaler_G is not None:
             scaler_G.scale(g_loss).backward()
+            for name, param in model.sam.image_encoder.named_parameters():
+                if param.requires_grad and param.grad is not None:
+                    print(f"{name} is being updated.")
             if max_grad_norm is not None and max_grad_norm > 0:
                 scaler_G.unscale_(optimizer_G) # 스케일링 해제
                 torch.nn.utils.clip_grad_norm_(
