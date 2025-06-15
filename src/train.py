@@ -189,7 +189,7 @@ def main(cfg):
                 optimizer.zero_grad();
                 
                 # ⭐ MedSAM 모델일 경우에만 prompt_masks(y) 전달
-                with autocast():
+                with autocast(device_type='cuda'):
                     if isinstance(model, MedSAM):
                         preds, preds_iou_for_log = model(x) # MedSAM은 (마스크, IoU) 튜플 반환
                         loss = criterion(preds, y)
