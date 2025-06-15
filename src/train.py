@@ -11,6 +11,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from datetime import datetime
 from sklearn.model_selection import KFold
+from torch.cuda.amp import autocast, GradScaler
 import shutil
 
 # 모델 임포트
@@ -122,7 +123,7 @@ def main(cfg):
     # --- 2. K-Fold 루프 시작 ---
     for fold, (train_index, val_index) in enumerate(kf.split(all_image_full_paths)):
         print(f"\n--- Starting Fold {fold + 1}/{cfg.train.k_folds} ---")
-
+        scaler = GradScaler()
         # 현재 폴드에 해당하는 훈련/검증 파일 전체 경로 리스트 생성
         fold_train_image_paths = [all_image_full_paths[i] for i in train_index]
         fold_train_mask_paths = [all_mask_full_paths[i] for i in train_index]
@@ -184,35 +185,38 @@ def main(cfg):
             loop = tqdm(train_dl, desc=f"Fold {fold+1} Epoch {epoch}/{cfg.train.epochs}", leave=False)
             for x, y in loop:
                 x, y = x.to(device), y.to(device)
-
-                # ⭐ MedSAM 모델일 경우에만 prompt_masks(y) 전달
-                if isinstance(model, MedSAM):
-                    preds, preds_iou_for_log = model(x) # MedSAM은 (마스크, IoU) 튜플 반환
-                    loss = criterion(preds, y)
-                else:
-                    preds = model(x) # output 이름은 preds로 통일
-                    # ⭐ Deep Supervision Loss 처리
-                    if isinstance(preds, tuple):
-                        pred_main, *pred_deep = preds
-                        loss = 0.98 * criterion(pred_main, y)
-                        for i, p in enumerate(pred_deep):
-                            try:
-                                h, w = y.shape[2], y.shape[3]
-                                p = nn.Conv2d(p.shape[1], 1, kernel_size=1).to(p.device)(p)
-                                p_up = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
-                                loss += 0.02 * criterion(p_up, y)
-                            except Exception as e:
-                                print(f"[ERROR] in deep supervision loss for p[{i}]: {e}")
-                                # raise # 에러 발생 시 훈련 중단 대신 메시지 출력 후 계속 진행 (또는 필요시 중단)
-                                # 현재는 에러 시 중단하는 기존 동작 유지
-
-                    else: # 단일 출력 모델
-                        loss = criterion(preds, y)
                 
-                optimizer.zero_grad(); loss.backward()
+                optimizer.zero_grad();
+                
+                # ⭐ MedSAM 모델일 경우에만 prompt_masks(y) 전달
+                with autocast():
+                    if isinstance(model, MedSAM):
+                        preds, preds_iou_for_log = model(x) # MedSAM은 (마스크, IoU) 튜플 반환
+                        loss = criterion(preds, y)
+                    else:
+                        preds = model(x) # output 이름은 preds로 통일
+                        # ⭐ Deep Supervision Loss 처리
+                        if isinstance(preds, tuple):
+                            pred_main, *pred_deep = preds
+                            loss = 0.98 * criterion(pred_main, y)
+                            for i, p in enumerate(pred_deep):
+                                try:
+                                    h, w = y.shape[2], y.shape[3]
+                                    p = nn.Conv2d(p.shape[1], 1, kernel_size=1).to(p.device)(p)
+                                    p_up = F.interpolate(p, size=(h, w), mode="bilinear", align_corners=False)
+                                    loss += 0.02 * criterion(p_up, y)
+                                except Exception as e:
+                                    print(f"[ERROR] in deep supervision loss for p[{i}]: {e}")
+                                    # raise # 에러 발생 시 훈련 중단 대신 메시지 출력 후 계속 진행 (또는 필요시 중단)
+                                    # 현재는 에러 시 중단하는 기존 동작 유지
+
+                        else: # 단일 출력 모델
+                            loss = criterion(preds, y)
+                
+                scaler.scale(loss).backward()
                 # ⭐ Gradient Clipping 적용
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-                optimizer.step()
+                scaler.step(optimizer)
                 train_loss += loss.item()
                 
                 # 훈련 중 현재 배치에 대한 평균 예측값 로깅
