@@ -195,7 +195,7 @@ def main(cfg):
                 with autocast(device_type='cuda'):
                     if isinstance(model, MedSAM):
                         preds, preds_iou_for_log = model(x) # MedSAM은 (마스크, IoU) 튜플 반환
-                        print(f"[MedSAM] Prediction mask shape: {pred.shape}")  # e.g., torch.Size([4, 1, 1024, 1024])
+                        print(f"[MedSAM] Prediction mask shape: {preds.shape}")  # e.g., torch.Size([4, 1, 1024, 1024])
                         print(f"[MedSAM] Ground truth mask shape: {y.shape}")  # e.g., torch.Size([4, 1, 1024, 1024])
 
                         loss = criterion(preds, y)
