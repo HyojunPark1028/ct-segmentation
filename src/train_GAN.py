@@ -361,6 +361,12 @@ def run_training_pipeline(cfg: OmegaConf):
             out_channels=cfg.model.out_channels
         ).to(device)
 
+        # 모델 총 파라미터 수 확인
+        total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+        print(f"[모델 정보] 총 파라미터 수: {total_params:,}")
+        print(f"[모델 정보] 학습 가능한 파라미터 수: {trainable_params:,}")
+
         if fold == 0:
             # ⭐ 디버그 추가: MedSAM_GAN.forward의 실제 시그니처 출력
             print(f"DEBUG: Actual MedSAM_GAN.forward signature: {inspect.signature(model.forward)}")

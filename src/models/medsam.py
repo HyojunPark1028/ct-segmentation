@@ -5,6 +5,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from segment_anything.build_sam import sam_model_registry
 import segmentation_models_pytorch as smp
+import time
 
 class MedSAM(nn.Module):
     def __init__(self, sam_checkpoint: str, unet_checkpoint: str, out_channels: int = 1):
@@ -15,9 +16,9 @@ class MedSAM(nn.Module):
         # SAM의 학습 가능/불가능 설정
         # (현재는 모두 학습 가능으로 설정되어 있지만, 필요에 따라 image_encoder를 고정할 수 있습니다.)
         for p in self.sam.image_encoder.parameters():
-            p.requires_grad = False
+            p.requires_grad = True
         for p in self.sam.prompt_encoder.parameters():
-            p.requires_grad = False
+            p.requires_grad = True
         for p in self.sam.mask_decoder.parameters():
             p.requires_grad = True
 
@@ -87,7 +88,7 @@ class MedSAM(nn.Module):
             boxes=None,
             masks=resized_prompt_mask # 저해상도 마스크 프롬프트
         )
-
+        start_decoder_time = time.time()
         # Step 4: Mask Decoder를 통해 최종 마스크 예측
         low_res_masks, iou_predictions = self.sam.mask_decoder(
             image_embeddings=image_embedding,
@@ -96,6 +97,9 @@ class MedSAM(nn.Module):
             dense_prompt_embeddings=dense_embeddings,
             multimask_output=False, # 단일 마스크 출력
         )
+
+        elapsed_decoder_time = time.time() - start_decoder_time
+        print(f"[MedSAM] Mask Decoder Forward Time: {elapsed_decoder_time:.4f} sec")
 
         # 최종 마스크를 원본 이미지 크기로 업스케일 (SAM 모델의 일반적인 동작)
         final_masks = F.interpolate(

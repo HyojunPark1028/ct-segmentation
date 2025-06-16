@@ -7,6 +7,7 @@ from segment_anything.build_sam import sam_model_registry
 import segmentation_models_pytorch as smp
 from typing import Optional, Tuple
 import os
+import time
 
 # --- 1. Discriminator 네트워크 정의 ---
 class MaskDiscriminator(nn.Module):
@@ -185,6 +186,8 @@ class MedSAM(nn.Module):
             # The more likely scenario is if sparse_prompt_embeddings and dense_prompt_embeddings were from different sources.
             # Given your current setup, it should implicitly align if `masks=resized_prompt_mask` is used and `resized_prompt_mask` has correct batch size.
 
+        start_decoder_time = time.time()
+
         # Step 4: Mask Decoder를 통해 최종 마스크 예측
         low_res_masks, iou_predictions = self.mask_decoder(
             image_embeddings=image_embedding,
@@ -193,6 +196,9 @@ class MedSAM(nn.Module):
             dense_prompt_embeddings=dense_prompt_embeddings,
             multimask_output=False, # 단일 마스크 출력
         )
+
+        elapsed_decoder_time = time.time() - start_decoder_time
+        print(f"[MedSAM-GAN] Mask Decoder Forward Time: {elapsed_decoder_time:.4f} sec")
 
         # 최종 마스크를 원본 이미지 크기로 업샘플링
         final_masks = F.interpolate(
