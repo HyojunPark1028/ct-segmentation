@@ -301,8 +301,8 @@ def main(cfg):
             gc.collect()
             torch.cuda.empty_cache()
         
-        epoch_time = time.time() - epoch_start_time
-        print(f"[Epoch {epoch+1}] Time: {epoch_time:.2f}s | Steps: {step_count}")       
+            epoch_time = time.time() - epoch_start_time
+            print(f"[Epoch {epoch+1}] Time: {epoch_time:.2f}s | Steps: {step_count}")       
 
         # --- Fold 학습 완료 후 처리 ---
         # 폴드별 에포크 메트릭 저장

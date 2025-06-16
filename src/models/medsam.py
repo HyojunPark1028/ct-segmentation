@@ -88,7 +88,7 @@ class MedSAM(nn.Module):
             boxes=None,
             masks=resized_prompt_mask # 저해상도 마스크 프롬프트
         )
-        start_decoder_time = time.time()
+        # start_decoder_time = time.time()
         # Step 4: Mask Decoder를 통해 최종 마스크 예측
         low_res_masks, iou_predictions = self.sam.mask_decoder(
             image_embeddings=image_embedding,
@@ -98,8 +98,8 @@ class MedSAM(nn.Module):
             multimask_output=False, # 단일 마스크 출력
         )
 
-        elapsed_decoder_time = time.time() - start_decoder_time
-        print(f"[MedSAM] Mask Decoder Forward Time: {elapsed_decoder_time:.4f} sec")
+        # elapsed_decoder_time = time.time() - start_decoder_time
+        # print(f"[MedSAM] Mask Decoder Forward Time: {elapsed_decoder_time:.4f} sec")
 
         # 최종 마스크를 원본 이미지 크기로 업스케일 (SAM 모델의 일반적인 동작)
         final_masks = F.interpolate(
