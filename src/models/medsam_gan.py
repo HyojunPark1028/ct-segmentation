@@ -68,12 +68,12 @@ class MedSAM(nn.Module):
         # SAM 모델 로드
         self.sam = sam_model_registry[model_type](checkpoint=checkpoint)
 
-        for p in self.sam.image_encoder.parameters():
-            p.requires_grad = False
-        for p in self.sam.prompt_encoder.parameters():
-            p.requires_grad = False
-        for p in self.sam.mask_decoder.parameters():
-            p.requires_grad = True
+        # for p in self.sam.image_encoder.parameters():
+        #     p.requires_grad = False
+        # for p in self.sam.prompt_encoder.parameters():
+        #     p.requires_grad = False
+        # for p in self.sam.mask_decoder.parameters():
+        #     p.requires_grad = True
 
         self.image_encoder = self.sam.image_encoder
         self.prompt_encoder = self.sam.prompt_encoder

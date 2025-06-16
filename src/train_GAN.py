@@ -173,8 +173,17 @@ def train_one_epoch(
 
         if scaler_G is not None:
             scaler_G.scale(g_loss).backward()
+
+            # ✅ encoder grad norm 확인 (AMP 사용 시)
+            scaler_G.unscale_(optimizer_G)  # 반드시 이 후에 grad를 확인해야 실값 확인 가능
+            total_encoder_norm = 0
+            for name, param in model.sam.image_encoder.named_parameters():
+                if param.grad is not None:
+                    total_encoder_norm += param.grad.norm().item()
+            print(f"[Epoch {epoch}, Iter {i}] Encoder Grad Norm: {total_encoder_norm:.6f}")
+
             if max_grad_norm is not None and max_grad_norm > 0:
-                scaler_G.unscale_(optimizer_G) # 스케일링 해제
+                # scaler_G.unscale_(optimizer_G) # 스케일링 해제
                 torch.nn.utils.clip_grad_norm_(
                     [p for p in model.sam.parameters() if p.requires_grad],
                     max_norm=max_grad_norm
