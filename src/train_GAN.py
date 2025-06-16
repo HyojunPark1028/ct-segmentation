@@ -88,6 +88,10 @@ def train_one_epoch(
     total_g_loss = 0.0
     total_d_loss = 0.0
 
+    g_step_count = 0
+    d_step_count = 0
+    epoch_start_time = time.time()
+
     # 각 배치에서 이미지와 마스크를 가져옵니다.
     for batch_idx, (images, masks) in enumerate(pbar): 
         images = images.to(device)
@@ -139,6 +143,7 @@ def train_one_epoch(
                     torch.nn.utils.clip_grad_norm_(model.discriminator.parameters(), max_norm=max_grad_norm)
                 scaler_D.step(optimizer_D)
                 scaler_D.update()
+                d_step_count += 1 
             else:
                 d_loss.backward()
                 if max_grad_norm is not None and max_grad_norm > 0:
@@ -182,6 +187,7 @@ def train_one_epoch(
                 )
             scaler_G.step(optimizer_G)
             scaler_G.update()
+            g_step_count += 1
         else:
             g_loss.backward()
             if max_grad_norm is not None and max_grad_norm > 0:
@@ -206,6 +212,9 @@ def train_one_epoch(
     avg_g_adv_loss = total_g_adv_loss / len(dataloader)
     avg_g_loss = total_g_loss / len(dataloader)
     avg_d_loss = total_d_loss / (len(dataloader) / d_update_interval)
+
+    epoch_time = time.time() - epoch_start_time
+    print(f"[Epoch {epoch+1}] Time: {epoch_time:.2f}s | G steps: {g_step_count}, D steps: {d_step_count}")
 
     return avg_g_loss, avg_d_loss, avg_seg_loss, avg_g_adv_loss
 

@@ -181,6 +181,9 @@ def main(cfg):
             train_loss = 0
             train_start = time.time()
             
+            step_count = 0            
+            epoch_start_time = time.time()
+
             # 훈련 루프
             loop = tqdm(train_dl, desc=f"Fold {fold+1} Epoch {epoch}/{cfg.train.epochs}", leave=False)
             for x, y in loop:
@@ -218,6 +221,7 @@ def main(cfg):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
+                step_count += 1
                 train_loss += loss.item()
                 
                 # 훈련 중 현재 배치에 대한 평균 예측값 로깅
@@ -296,6 +300,9 @@ def main(cfg):
             # Garbage collection
             gc.collect()
             torch.cuda.empty_cache()
+        
+        epoch_time = time.time() - epoch_start_time
+        print(f"[Epoch {epoch+1}] Time: {epoch_time:.2f}s | Steps: {step_count}")       
 
         # --- Fold 학습 완료 후 처리 ---
         # 폴드별 에포크 메트릭 저장
