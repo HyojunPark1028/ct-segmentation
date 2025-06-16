@@ -13,6 +13,7 @@ from datetime import datetime
 from sklearn.model_selection import KFold
 from torch.amp import GradScaler, autocast
 import shutil
+import torch.autograd.profiler as profiler
 
 # 모델 임포트
 from .models.unet import UNet
@@ -218,12 +219,16 @@ def main(cfg):
 
                         else: # 단일 출력 모델
                             loss = criterion(preds, y)
-                
-                scaler.scale(loss).backward()
+
+                with torch.autograd.profiler.profile(use_cuda=True) as prof:
+                    scaler.scale(loss).backward()
                 # ⭐ Gradient Clipping 적용
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 scaler.step(optimizer)
                 scaler.update()
+                
+                print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=10))
+                prof.export_chrome_trace("medsam_backward.json")
                 # step_count += 1
                 train_loss += loss.item()
                 

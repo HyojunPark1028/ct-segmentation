@@ -15,6 +15,8 @@ import shutil
 import glob
 import inspect 
 
+import torch.autograd.profiler as profiler
+
 # For AMP (Automatic Mixed Precision)
 from torch.amp import GradScaler, autocast
 
@@ -180,7 +182,8 @@ def train_one_epoch(
             g_loss = (seg_loss * segmentation_weight) + (g_adv_loss * adversarial_weight)
 
         if scaler_G is not None:
-            scaler_G.scale(g_loss).backward()
+            with torch.autograd.profiler.profile(use_cuda=True) as prof:
+                scaler_G.scale(g_loss).backward()
 
             if max_grad_norm is not None and max_grad_norm > 0:
                 scaler_G.unscale_(optimizer_G) # 스케일링 해제
@@ -190,6 +193,9 @@ def train_one_epoch(
                 )
             scaler_G.step(optimizer_G)
             scaler_G.update()
+
+            print(prof.key_averages().table(sort_by="self_cuda_time_total", row_limit=10))
+            prof.export_chrome_trace("gan_generator_backward.json")
             # g_step_count += 1
         else:
             g_loss.backward()
