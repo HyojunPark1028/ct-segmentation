@@ -180,7 +180,7 @@ def train_one_epoch(
             for name, param in model.sam.image_encoder.named_parameters():
                 if param.grad is not None:
                     total_encoder_norm += param.grad.norm().item()
-            print(f"[Epoch {epoch}, Iter {i}] Encoder Grad Norm: {total_encoder_norm:.6f}")
+            print(f"[Epoch {epoch}, Iter {batch_idx}] Encoder Grad Norm: {total_encoder_norm:.6f}")
 
             if max_grad_norm is not None and max_grad_norm > 0:
                 # scaler_G.unscale_(optimizer_G) # 스케일링 해제
