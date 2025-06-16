@@ -32,7 +32,7 @@ optimizer:
 
 losses:
   segmentation_weight: 1.0 # DiceFocalLoss의 가중치
-  adversarial_weight: 0.005 # Generator 손실에서 Adversarial Loss의 가중치
+  adversarial_weight: 0.1 #  0.005 Generator 손실에서 Adversarial Loss의 가중치
   lambda_gp: 10.0 # WGAN-GP Gradient Penalty 가중치
 
   # ⭐ 추가: DiceFocalLoss 및 FocalLoss 내부 파라미터
